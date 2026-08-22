@@ -187,7 +187,7 @@ const client = new Client({
   ],
 });
 
-// --- TỐI ƯU CẤU HÌNH YOUTUBE VÀ THỨ TỰ PLUGIN ---
+// --- CẤU HÌNH YOUTUBE & THỨ TỰ PLUGIN ---
 const ytOptions = {
   playerClients: ["TVHTML5", "ANDROID", "IOS"],
   fetchOptions: {
@@ -205,7 +205,7 @@ const manager = new PlayerManager({
   plugins: [
     new TTSPlugin(),
     new SpotifyPlugin(),
-    new InfinityPlugin(), // InfinityPlugin ưu tiên để lấy nhạc khi YouTube bị block
+    new InfinityPlugin(),
     new YouTubePlugin(ytOptions),
   ],
   autoCleanup: false,
@@ -224,7 +224,34 @@ client.on("error", (err) => console.error("Discord client error:", err));
 process.on("unhandledRejection", (err) => console.error("UnhandledRejection:", err));
 process.on("uncaughtException", (err) => console.error("UncaughtException:", err));
 
-// --- SỬA LỖI TRÍCH XUẤT VÀ LỌC TRACK BỊ LỖI ---
+// --- XỬ LÝ LỖI CLARITY FILTER ---
+const applyClarity = async (player) => {
+  if (!player) return false;
+  try {
+    if (player.filter && typeof player.filter.applyFilter === "function") {
+      await player.filter.applyFilter("trebleboost");
+      return true;
+    }
+    if (player.filters && typeof player.filters.set === "function") {
+      await player.filters.set("trebleboost");
+      return true;
+    }
+    if (typeof player.setFilter === "function") {
+      await player.setFilter("trebleboost");
+      return true;
+    }
+    if (player.filters && typeof player.filters.setTrebleBoost === "function") {
+      await player.filters.setTrebleBoost(true);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error("applyClarity error:", error);
+    return false;
+  }
+};
+
+// --- TRÍCH XUẤT TRACK HỢP LỆ ---
 const extractTracksFromResult = (result) => {
   if (!result) return [];
   
@@ -235,7 +262,6 @@ const extractTracksFromResult = (result) => {
   else if (result?.playlist && Array.isArray(result.playlist)) rawList = result.playlist;
   else if (typeof result === "object") rawList = [result];
 
-  // Loại bỏ các track bị rỗng dữ liệu hoặc lỗi từ YouTube
   return rawList.filter(
     (t) => t && (t.title || t.name) && t.title !== "Unknown title" && (t.url || t.uri) && t.url !== "undefined"
   );
@@ -403,6 +429,7 @@ client.on(Events.MessageCreate, async (msg) => {
         if (foundTracks.length > 1 && activePlayer.queue?.add) {
           for (let i = 1; i < foundTracks.length; i++) {
             try {
+              if (foundTracks[i]) foundTracks[i].requestedBy = msg.author.id;
               activePlayer.queue.add(foundTracks[i]);
             } catch (e) {
               console.warn("Failed to add track to queue:", e);
@@ -412,6 +439,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
         if (!activePlayer.currentTrack && foundTracks.length > 0) {
           try {
+            if (foundTracks[0]) foundTracks[0].requestedBy = msg.author.id;
             await activePlayer.play(foundTracks[0], msg.author.id);
             await sleep(500);
           } catch (e) {
@@ -420,6 +448,7 @@ client.on(Events.MessageCreate, async (msg) => {
         }
 
         if (activePlayer.currentTrack && activePlayer.currentTrack.title !== "Unknown title") {
+          activePlayer.currentTrack.requestedBy = msg.author.id;
           const title = activePlayer.currentTrack.title || activePlayer.currentTrack.name || foundTracks[0]?.title || "Bài hát";
           return replyMsg.edit(`▶️ Đang phát: **${title}**`);
         } else {
@@ -449,10 +478,16 @@ client.on(Events.MessageCreate, async (msg) => {
       } else return msg.reply("❌ Không hỗ trợ resume.");
     }
 
+    // --- KHÔI PHỤC BẢO VỆ QUYỀN HẠN DÙNG SKIP ---
     if (command === "skip" || command === "s") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice.");
       const currentTrack = player.currentTrack;
       if (!currentTrack) return msg.reply("❌ Không có bài hát nào đang phát.");
+      
+      if (currentTrack.requestedBy && currentTrack.requestedBy !== msg.author.id) {
+        return msg.reply("🔒 Chỉ người yêu cầu bài hát này mới có quyền skip!");
+      }
+
       try {
         if (typeof player.skip === "function") player.skip();
         else if (player.queue?.advance) player.queue.advance();
@@ -461,13 +496,33 @@ client.on(Events.MessageCreate, async (msg) => {
       return msg.reply(`⏭️ **${msg.author.displayName}** đã bỏ qua bài hát!`);
     }
 
+    // --- KHÔI PHỤC BẢO VỆ QUYỀN HẠN DÙNG STOP ---
     if (command === "stop") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice.");
+      const currentTrack = player.currentTrack;
+
+      if (currentTrack && currentTrack.requestedBy && currentTrack.requestedBy !== msg.author.id) {
+        return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại mới có quyền stop!");
+      }
+
       try {
         if (typeof player.stop === "function") player.stop();
         else if (player.queue && typeof player.queue.clear === "function") player.queue.clear();
       } catch (e) { console.error("stop error:", e); return msg.reply("❌ Lỗi khi dừng."); }
       return msg.reply("⏹️ Đã dừng phát nhạc.");
+    }
+
+    // --- BỔ SUNG KHỐI LỆNH CLARITY FILTER ---
+    if (command === "clarity") {
+      if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice.");
+      if (!player.currentTrack) return msg.reply("❌ Không có bài hát nào đang phát.");
+
+      const success = await applyClarity(player);
+      if (success) {
+        return msg.reply("✨ Đã bật chế độ âm thanh **Clarity (Treble Boost)**!");
+      } else {
+        return msg.reply("❌ Trình phát nhạc hiện tại không hỗ trợ bộ lọc hiệu ứng Clarity.");
+      }
     }
 
     if (command === "time" || command === "t") {
