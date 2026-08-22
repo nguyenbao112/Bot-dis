@@ -192,7 +192,7 @@ const manager = new PlayerManager({
     new InfinityPlugin(),
   ],
   autoCleanup: false,
-  extractorTimeout: 90000,
+  extractorTimeout: 120000,
 });
 
 client.once(Events.ClientReady, (readyClient) => {
@@ -283,6 +283,28 @@ const fetchYouTubeDurationMs = async (url) => {
     console.error("Failed to fetch YouTube duration:", e.message || e);
   }
   return null;
+};
+
+// FIX: Hàm để trích xuất track từ kết quả search
+const extractTracksFromResult = (result) => {
+  if (!result) return [];
+  
+  // Nếu result là array trực tiếp
+  if (Array.isArray(result)) return result;
+  
+  // Nếu có tracks array
+  if (Array.isArray(result?.tracks)) return result.tracks;
+  
+  // Nếu có single track
+  if (result?.track) return [result.track];
+  
+  // Nếu result là track object
+  if (result?.title || result?.id || result?.uri || result?.url) return [result];
+  
+  // Nếu có playlist
+  if (result?.playlist && Array.isArray(result.playlist)) return result.playlist;
+  
+  return [];
 };
 
 client.on(Events.MessageCreate, async (msg) => {
@@ -426,22 +448,42 @@ client.on(Events.MessageCreate, async (msg) => {
           searchQuery = `scsearch:${searchQuery}`;
         }
 
-        const result = await activePlayer.play(searchQuery, msg.author.id);
-        console.log("play result:", result);
-
-        let foundTracks = [];
-        if (Array.isArray(result)) foundTracks = result;
-        else if (Array.isArray(result?.tracks)) foundTracks = result.tracks;
-        else if (result?.track) foundTracks = [result.track];
-        else if (result?.title || result?.id || result?.uri) foundTracks = [result];
-
-        if (foundTracks.length === 0 && activePlayer.currentTrack) foundTracks = [activePlayer.currentTrack];
-
-        if (!foundTracks || foundTracks.length === 0) {
-          console.warn("No tracks found from play result, result object:", result);
-          return replyMsg.edit("❌ Không tìm thấy bài hát hoặc plugin không trả về track hợp lệ.");
+        // FIX: Thêm timeout và error handling tốt hơn
+        let result;
+        try {
+          const playPromise = activePlayer.play(searchQuery, msg.author.id);
+          result = await Promise.race([
+            playPromise,
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error("Play timeout")), 120000)
+            )
+          ]);
+        } catch (timeoutErr) {
+          console.error("Play timeout or error:", timeoutErr.message);
+          return replyMsg.edit("❌ Không thể tải bài hát này (timeout hoặc lỗi plugin).");
         }
 
+        console.log("play result:", result);
+
+        // FIX: Sử dụng hàm trích xuất track cải thiện
+        let foundTracks = extractTracksFromResult(result);
+
+        // Fallback: nếu không tìm được track từ result, kiểm tra currentTrack
+        if (foundTracks.length === 0 && activePlayer.currentTrack) {
+          foundTracks = [activePlayer.currentTrack];
+        }
+
+        // FIX: Thêm log chi tiết để debug
+        if (foundTracks.length === 0) {
+          console.warn("No tracks found. Result structure:", {
+            isArray: Array.isArray(result),
+            keys: result ? Object.keys(result) : null,
+            type: typeof result,
+          });
+          return replyMsg.edit("❌ Không tìm thấy bài hát. Thử URL khác hoặc từ khóa khác!");
+        }
+
+        // Thêm các track từ thứ 2 trở đi vào queue
         if (foundTracks.length > 1 && activePlayer.queue?.add) {
           for (let i = 1; i < foundTracks.length; i++) {
             try {
@@ -452,28 +494,31 @@ client.on(Events.MessageCreate, async (msg) => {
           }
         }
 
-        if (!activePlayer.currentTrack) {
+        // FIX: Đảm bảo track đầu tiên được phát
+        if (!activePlayer.currentTrack && foundTracks.length > 0) {
           try {
-            const first = foundTracks[0];
-            await activePlayer.play(first, msg.author.id);
-            await sleep(300);
+            const firstTrack = foundTracks[0];
+            console.log("Playing first track:", firstTrack?.title || firstTrack?.name);
+            await activePlayer.play(firstTrack, msg.author.id);
+            await sleep(500);
           } catch (e) {
-            console.warn("Fallback play attempt failed:", e);
+            console.warn("Fallback play attempt failed:", e.message);
           }
         }
 
+        // Phản hồi cuối cùng
         if (activePlayer.currentTrack) {
           const title = activePlayer.currentTrack.title || activePlayer.currentTrack.name || foundTracks[0]?.title || "Unknown";
           return replyMsg.edit(`▶️ Đang phát: **${title}**`);
         } else {
-          if (activePlayer.queue?.items?.length > 0 || foundTracks.length > 1) {
+          if (foundTracks.length > 1) {
             return replyMsg.edit(`🎶 Đã thêm **${foundTracks.length} bài** vào hàng đợi!`);
           }
           return replyMsg.edit("❌ Đã tìm thấy bài nhưng không thể phát (kiểm tra logs).");
         }
       } catch (error) {
-        console.error("Play error:", error);
-        return replyMsg.edit("❌ Không thể tải/phát bài hát này.");
+        console.error("Play error details:", error);
+        return replyMsg.edit("❌ Không thể tải/phát bài hát này. Thử lại hoặc liên hệ admin.");
       }
     }
 
