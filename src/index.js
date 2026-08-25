@@ -4,7 +4,6 @@ import {
   Client,
   GatewayIntentBits,
   EmbedBuilder,
-  PermissionFlagsBits,
   Events,
 } from "discord.js";
 import { PlayerManager } from "ziplayer";
@@ -220,17 +219,27 @@ client.on(Events.MessageCreate, async (msg) => {
       return player;
     };
 
+    /* HÀM KẾT NỐI VOICE AN TOÀN */
+    const connectToVoice = async (activePlayer, channel) => {
+      if (!activePlayer.connection) {
+        await activePlayer.connect(channel, {
+          selfDeaf: true,
+          group: client.user.id,
+          adapterCreator: channel.guild.voiceAdapterCreator,
+        });
+      }
+    };
+
     /* JOIN */
     if (command === "join") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice trước.");
       try {
         const activePlayer = await getOrCreatePlayer();
-        if (!activePlayer.connection) {
-          await activePlayer.connect(voiceChannel, { selfDeaf: true });
-        }
+        await connectToVoice(activePlayer, voiceChannel);
         return msg.reply(`📌 Đã vào **${voiceChannel.name}**`);
       } catch (error) {
-        return msg.reply("❌ Không thể vào voice.");
+        console.error("❌ Lỗi JOIN Voice:", error);
+        return msg.reply("❌ Không thể vào voice. Hãy kiểm tra quyền của Bot!");
       }
     }
 
@@ -249,11 +258,10 @@ client.on(Events.MessageCreate, async (msg) => {
       const activePlayer = await getOrCreatePlayer();
 
       try {
-        if (!activePlayer.connection) {
-          await activePlayer.connect(voiceChannel, { selfDeaf: true });
-        }
+        await connectToVoice(activePlayer, voiceChannel);
       } catch (error) {
-        return msg.reply("❌ Không kết nối được voice.");
+        console.error("❌ Lỗi KẾT NỐI VOICE:", error);
+        return msg.reply("❌ Không kết nối được voice. Kiểm tra lại quyền Connect/Speak của bot!");
       }
 
       const replyMsg = await msg.reply("🔎 Đang tìm và tải nhạc...");
@@ -298,7 +306,7 @@ client.on(Events.MessageCreate, async (msg) => {
       return msg.reply("▶️ Đã phát tiếp.");
     }
 
-    /* SKIP (CHỈ CHO PHÉP NGƯỜI BẬT BÀI HÁT SKIP) */
+    /* SKIP */
     if (command === "skip" || command === "s") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice để sử dụng lệnh này.");
       
