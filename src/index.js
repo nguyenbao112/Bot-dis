@@ -20,9 +20,9 @@ import { InfinityPlugin } from "@ziplayer/infinity";
 const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const YT_COOKIE = process.env.YT_COOKIE || "";
 
-console.log("🔍 Đang kiểm tra biến môi trường...");
+console.log("🔍 Đang kiểm tra cấu hình môi trường...");
 if (!TOKEN) {
-  console.error("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN trong Environment Variables!");
+  console.error("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN!");
   process.exit(1);
 }
 
@@ -183,7 +183,7 @@ const createProgressBar = (currentMs, totalMs, size = 15) => {
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
-// --- KHỞI TẠO CLIENT VỚI REST TIMEOUT ĐỂ TRÁNH TREO TRÊN RENDER ---
+// --- KHỞI TẠO DISCORD CLIENT ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -192,49 +192,54 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
   rest: {
-    timeout: 15000,
-    retries: 3,
+    timeout: 30000,
+    retries: 5,
   },
 });
 
-// --- CẤU HÌNH YOUTUBE & THỨ TỰ PLUGIN ---
-const ytOptions = {
-  playerClients: ["TVHTML5", "ANDROID", "IOS"],
-  fetchOptions: {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (SmartTV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.93 TV Safari/537.36",
+let manager = null;
+
+// Khởi tạo PlayerManager sau khi Client đã sẵn sàng
+const initMusicManager = () => {
+  if (manager) return;
+  const ytOptions = {
+    playerClients: ["TVHTML5", "ANDROID", "IOS"],
+    fetchOptions: {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (SmartTV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.93 TV Safari/537.36",
+      },
     },
-  },
+  };
+
+  if (YT_COOKIE && YT_COOKIE.trim() !== "") {
+    ytOptions.youtubeOptions = { cookies: YT_COOKIE };
+  }
+
+  manager = new PlayerManager({
+    plugins: [
+      new TTSPlugin(),
+      new SpotifyPlugin(),
+      new InfinityPlugin(),
+      new YouTubePlugin(ytOptions),
+    ],
+    autoCleanup: false,
+    extractorTimeout: 120000,
+  });
+  console.log("🎵 Trình phát nhạc (PlayerManager) đã khởi tạo xong.");
 };
-
-if (YT_COOKIE && YT_COOKIE.trim() !== "") {
-  ytOptions.youtubeOptions = { cookies: YT_COOKIE };
-}
-
-const manager = new PlayerManager({
-  plugins: [
-    new TTSPlugin(),
-    new SpotifyPlugin(),
-    new InfinityPlugin(),
-    new YouTubePlugin(ytOptions),
-  ],
-  autoCleanup: false,
-  extractorTimeout: 120000,
-});
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log("========================================");
-  console.log("🤖 BOT MUSIC ĐÃ ONLINE SẴN SÀNG");
+  console.log("🤖 BOT MUSIC ĐÃ ONLINE SẴN SÀNG!");
   console.log(`👤 Tên Bot: ${readyClient.user.tag}`);
-  console.log("🎵 Nguồn hỗ trợ: YouTube, Spotify, SoundCloud, Infinity");
   console.log("========================================");
+  initMusicManager();
 });
 
 client.on("error", (err) => console.error("❌ Discord Client Error:", err));
 process.on("unhandledRejection", (err) => console.error("❌ UnhandledRejection:", err));
 process.on("uncaughtException", (err) => console.error("❌ UncaughtException:", err));
 
-// --- XỬ LÝ LỖI CLARITY FILTER ---
 const applyClarity = async (player) => {
   if (!player) return false;
   try {
@@ -261,10 +266,8 @@ const applyClarity = async (player) => {
   }
 };
 
-// --- TRÍCH XUẤT TRACK HỢP LỆ ---
 const extractTracksFromResult = (result) => {
   if (!result) return [];
-  
   let rawList = [];
   if (Array.isArray(result)) rawList = result;
   else if (Array.isArray(result?.tracks)) rawList = result.tracks;
@@ -346,6 +349,8 @@ client.on(Events.MessageCreate, async (msg) => {
       return msg.reply({ embeds: [helpEmbed] });
     }
 
+    if (!manager) initMusicManager();
+
     const voiceChannel = msg.member?.voice?.channel;
     let player = manager.get(msg.guildId);
 
@@ -422,7 +427,7 @@ client.on(Events.MessageCreate, async (msg) => {
           ]);
         } catch (timeoutErr) {
           console.error("Play timeout or error:", timeoutErr.message);
-          return replyMsg.edit("❌ Không thể tải bài hát này (IP Render bị chặn). Hãy thử dán link Spotify!");
+          return replyMsg.edit("❌ Không thể tải bài hát này. Hãy thử dán link Spotify!");
         }
 
         let foundTracks = extractTracksFromResult(result);
@@ -551,11 +556,8 @@ client.on(Events.MessageCreate, async (msg) => {
   }
 });
 
-// --- TIẾN HÀNH ĐĂNG NHẬP VỚI BẮT LỖI CHI TIẾT ---
+// --- TIẾN HÀNH KẾT NỐI KHI CODE ĐÃ TẢI XONG ---
 console.log("🔄 Đang gửi yêu cầu kết nối tới Discord Gateway...");
 client.login(TOKEN)
-  .then(() => console.log("🔑 Xác thực thành công! Đang đợi sự kiện Ready..."))
-  .catch((err) => {
-    console.error("❌ ĐĂNG NHẬP THẤT BẠI:");
-    console.error(err);
-  });
+  .then(() => console.log("🔑 Đã gửi xong yêu cầu login!"))
+  .catch((err) => console.error("❌ LỖI ĐĂNG NHẬP:", err));
