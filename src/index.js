@@ -16,7 +16,7 @@ import {
 import { InfinityPlugin } from "@ziplayer/infinity";
 
 /* =========================================================
-   CONFIG & KEEP-ALIVE HTTP SERVER (RENDER PORT BINDING)
+   CONFIG & KEEP-ALIVE SERVER (RENDER REQUIREMENT)
 ========================================================= */
 
 const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
@@ -28,12 +28,10 @@ if (!TOKEN) {
 
 const PORT = process.env.PORT || 10000;
 
-const server = http.createServer((req, res) => {
+http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   res.end("Bot Discord Online 24/7!");
-});
-
-server.listen(PORT, "0.0.0.0", () => {
+}).listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Web server running on port ${PORT}`);
 });
 
@@ -64,9 +62,7 @@ const initPlayerManager = () => {
   if (manager) return;
   manager = new PlayerManager({
     plugins: [
-      new YouTubePlugin({
-        playerClients: ["TVHTML5", "ANDROID", "IOS"],
-      }),
+      new YouTubePlugin(),
       new SpotifyPlugin(),
       new TTSPlugin(),
       new InfinityPlugin(),
