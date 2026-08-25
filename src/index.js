@@ -231,7 +231,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
     /* HÀM KẾT NỐI VOICE AN TOÀN */
     const connectToVoice = async (activePlayer, channel) => {
-      if (!activePlayer.connection) {
+      if (!activePlayer.connection || activePlayer.connection.state.status === "destroyed") {
         await activePlayer.connect(channel, {
           selfDeaf: true,
           group: client.user.id,
@@ -280,7 +280,9 @@ client.on(Events.MessageCreate, async (msg) => {
         await connectToVoice(activePlayer, voiceChannel);
       } catch (error) {
         console.error("❌ Lỗi KẾT NỐI VOICE:", error);
-        return msg.reply("❌ Không kết nối được voice. Kiểm tra lại quyền Connect/Speak của bot!");
+        if (!activePlayer.isPlaying && !activePlayer.currentTrack) {
+          return msg.reply("❌ Không kết nối được voice. Kiểm tra lại quyền Connect/Speak của bot!");
+        }
       }
 
       const replyMsg = await msg.reply("🔎 Đang tìm và tải nhạc...");
