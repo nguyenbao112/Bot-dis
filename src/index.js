@@ -62,12 +62,14 @@ let manager;
 const initPlayerManager = () => {
   if (manager) return;
 
-  const scClientId = process.env.SOUNDCLOUD_CLIENT_ID || "iZGeft3Standard223849384938493";
+  // Sử dụng Client ID SoundCloud xịn / hợp lệ để tránh lỗi tự động fetch clientId
+  const scClientId = process.env.SOUNDCLOUD_CLIENT_ID || "LBC23966572134584289895627236310";
 
   manager = new PlayerManager({
     plugins: [
       new SoundCloudPlugin({
         clientId: scClientId,
+        clientIdFetcher: async () => scClientId, // Ép dùng ID dự phòng nếu fetch xịt
       }),
       new YouTubePlugin({
         playerClients: ["TVHTML5", "ANDROID", "IOS"],
@@ -149,7 +151,6 @@ client.on(Events.MessageCreate, async (msg) => {
     const command = parts.shift()?.toLowerCase();
     const query = parts.join(" ").trim();
 
-    // Gộp tất cả nguồn phát chung vào play / p
     const musicCommands = [
       "help", "h", "play", "p", "pause", "resume", 
       "skip", "s", "stop", "volume", "vol", "filter", "clarity", 
@@ -163,7 +164,7 @@ client.on(Events.MessageCreate, async (msg) => {
       const helpEmbed = new EmbedBuilder()
         .setColor("#0099ff")
         .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
-        .setDescription("Tiền tố lệnh là: `!`\nTrình phát tự động nhận diện: **SoundCloud, YouTube, Spotify, Infinity**.")
+        .setDescription("Tiền tố lệnh là: `!`\nTrình phát tự động hỗ trợ: **SoundCloud, YouTube, Spotify, Infinity**.")
         .addFields(
           {
             name: "▶️ Phát Nhạc (Tất cả nguồn)",
@@ -227,7 +228,7 @@ client.on(Events.MessageCreate, async (msg) => {
       return player;
     };
 
-    /* HÀM KẾT NỐI VOICE AN TOÀN - CHỐNG XUNG ĐỘT RECONNECT */
+    /* HÀM KẾT NỐI VOICE AN TOÀN - TRÁNH LỖI XUNG ĐỘT */
     const connectToVoice = async (activePlayer, channel) => {
       if (!activePlayer.connection || activePlayer.connection.state?.status === "destroyed") {
         await activePlayer.connect(channel, {
@@ -238,7 +239,7 @@ client.on(Events.MessageCreate, async (msg) => {
       }
     };
 
-    /* HÀM KIỂM TRA QUYỀN ĐIỀU KHIỂN (BẢO VỆ CHẶT CHẼ) */
+    /* HÀM KIỂM TRA QUYỀN ĐIỀU KHIỂN (KHÓA QUYỀN CHẶT CHẼ) */
     const isOwnerOrAdmin = () => {
       const currentTrack = player?.currentTrack;
       const isRequester = currentTrack?.requestedBy === msg.author.id;
@@ -267,7 +268,7 @@ client.on(Events.MessageCreate, async (msg) => {
       return msg.reply("👋 Bot đã rời phòng voice.");
     }
 
-    /* PLAY / P (GỘP CHUNG TẤT CẢ NGUỒN) */
+    /* PLAY / P (GỘP CHUNG TẤT CẢ NGUỒN PHÁT) */
     if (command === "play" || command === "p") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice trước.");
       if (!query) return msg.reply("❌ Dùng: `!play <tên bài/link SoundCloud, YT, Spotify>`");
@@ -288,7 +289,6 @@ client.on(Events.MessageCreate, async (msg) => {
       try {
         let searchQuery = query.trim();
 
-        // Tự động ưu tiên tìm SoundCloud nếu link chứa soundcloud.com
         if (searchQuery.includes("soundcloud.com") && !searchQuery.startsWith("http")) {
           searchQuery = `scsearch:${searchQuery}`;
         }
