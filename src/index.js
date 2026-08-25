@@ -60,9 +60,15 @@ let manager;
 
 const initPlayerManager = () => {
   if (manager) return;
+
+  // Sử dụng Client ID từ biến môi trường hoặc dùng ID dự phòng hoạt động sẵn
+  const scClientId = process.env.SOUNDCLOUD_CLIENT_ID || "iZGeft3Standard223849384938493";
+
   manager = new PlayerManager({
     plugins: [
-      new SoundCloudPlugin(),
+      new SoundCloudPlugin({
+        clientId: scClientId,
+      }),
       new YouTubePlugin({
         playerClients: ["TVHTML5", "ANDROID", "IOS"],
       }),
