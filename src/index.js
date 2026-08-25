@@ -149,8 +149,9 @@ client.on(Events.MessageCreate, async (msg) => {
     const command = parts.shift()?.toLowerCase();
     const query = parts.join(" ").trim();
 
+    // Gộp tất cả nguồn phát chung vào play / p
     const musicCommands = [
-      "help", "h", "play", "p", "scplay", "sc", "pause", "resume", 
+      "help", "h", "play", "p", "pause", "resume", 
       "skip", "s", "stop", "volume", "vol", "filter", "clarity", 
       "queue", "q", "nowplaying", "np", "join", "leave"
     ];
@@ -162,16 +163,14 @@ client.on(Events.MessageCreate, async (msg) => {
       const helpEmbed = new EmbedBuilder()
         .setColor("#0099ff")
         .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
-        .setDescription("Tiền tố lệnh là: `!`\nTrình phát hỗ trợ các nguồn: **SoundCloud, YouTube, Spotify, Infinity**.")
+        .setDescription("Tiền tố lệnh là: `!`\nTrình phát tự động nhận diện: **SoundCloud, YouTube, Spotify, Infinity**.")
         .addFields(
           {
-            name: "▶️ Phát Nhạc",
-            value: 
-              "`!play <tên bài/link>` (hoặc `!p`): Phát nhạc từ YT, Spotify...\n" +
-              "`!scplay <tên bài/link>` (hoặc `!sc`): Tìm và phát nhạc từ SoundCloud.",
+            name: "▶️ Phát Nhạc (Tất cả nguồn)",
+            value: "`!play <tên bài/link>` (hoặc `!p`): Phát nhạc tự động từ SoundCloud, YT, Spotify...",
           },
           {
-            name: "🎛️ Điều Khiển Trình Phát (Chỉ Người Gọi Bài/Admin)",
+            name: "🎛️ Quyền Điều Khiển (Chỉ Người Gọi Bài/Admin)",
             value: 
               "`!pause`: Tạm dừng bài hát.\n" +
               "`!resume`: Tiếp tục phát nhạc.\n" +
@@ -201,7 +200,6 @@ client.on(Events.MessageCreate, async (msg) => {
     if (!manager) initPlayerManager();
 
     const voiceChannel = msg.member?.voice?.channel;
-
     let player = manager.get(msg.guildId);
 
     const getOrCreatePlayer = async () => {
@@ -229,9 +227,9 @@ client.on(Events.MessageCreate, async (msg) => {
       return player;
     };
 
-    /* HÀM KẾT NỐI VOICE AN TOÀN */
+    /* HÀM KẾT NỐI VOICE AN TOÀN - CHỐNG XUNG ĐỘT RECONNECT */
     const connectToVoice = async (activePlayer, channel) => {
-      if (!activePlayer.connection || activePlayer.connection.state.status === "destroyed") {
+      if (!activePlayer.connection || activePlayer.connection.state?.status === "destroyed") {
         await activePlayer.connect(channel, {
           selfDeaf: true,
           group: client.user.id,
@@ -240,7 +238,7 @@ client.on(Events.MessageCreate, async (msg) => {
       }
     };
 
-    /* HÀM KIỂM TRA QUYỀN ĐIỀU KHIỂN (REQUESTER HOẶC ADMIN) */
+    /* HÀM KIỂM TRA QUYỀN ĐIỀU KHIỂN (BẢO VỆ CHẶT CHẼ) */
     const isOwnerOrAdmin = () => {
       const currentTrack = player?.currentTrack;
       const isRequester = currentTrack?.requestedBy === msg.author.id;
@@ -261,18 +259,18 @@ client.on(Events.MessageCreate, async (msg) => {
       }
     }
 
-    /* LEAVE */
+    /* LEAVE (BẢO VỆ QUYỀN) */
     if (command === "leave") {
       if (!player) return msg.reply("❌ Bot chưa ở trong phòng voice.");
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền buộc bot rời phòng!");
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại hoặc Admin mới có quyền cho bot rời phòng!");
       player.destroy();
       return msg.reply("👋 Bot đã rời phòng voice.");
     }
 
-    /* PLAY / SCPLAY */
-    if (command === "play" || command === "p" || command === "scplay" || command === "sc") {
+    /* PLAY / P (GỘP CHUNG TẤT CẢ NGUỒN) */
+    if (command === "play" || command === "p") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice trước.");
-      if (!query) return msg.reply("❌ Dùng: `!play <tên bài/URL>` hoặc `!sc <tên bài hát SoundCloud>`");
+      if (!query) return msg.reply("❌ Dùng: `!play <tên bài/link SoundCloud, YT, Spotify>`");
 
       const activePlayer = await getOrCreatePlayer();
 
@@ -290,10 +288,9 @@ client.on(Events.MessageCreate, async (msg) => {
       try {
         let searchQuery = query.trim();
 
-        if (command === "scplay" || command === "sc") {
-          if (!searchQuery.startsWith("http://") && !searchQuery.startsWith("https://")) {
-            searchQuery = `scsearch:${searchQuery}`;
-          }
+        // Tự động ưu tiên tìm SoundCloud nếu link chứa soundcloud.com
+        if (searchQuery.includes("soundcloud.com") && !searchQuery.startsWith("http")) {
+          searchQuery = `scsearch:${searchQuery}`;
         }
 
         const result = await activePlayer.play(searchQuery, msg.author.id);
@@ -313,7 +310,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
     if (!player) return msg.reply("❌ Hiện tại bot chưa hoạt động trong Server này.");
 
-    /* PAUSE */
+    /* PAUSE (BẢO VỆ QUYỀN) */
     if (command === "pause") {
       if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền tạm dừng!");
       if (!player.isPlaying) return msg.reply("❌ Nhạc không đang phát.");
@@ -321,7 +318,7 @@ client.on(Events.MessageCreate, async (msg) => {
       return msg.reply("⏸️ Đã tạm dừng.");
     }
 
-    /* RESUME */
+    /* RESUME (BẢO VỆ QUYỀN) */
     if (command === "resume") {
       if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền tiếp tục!");
       if (!player.isPaused) return msg.reply("❌ Nhạc đang phát rồi.");
@@ -329,25 +326,25 @@ client.on(Events.MessageCreate, async (msg) => {
       return msg.reply("▶️ Đã phát tiếp.");
     }
 
-    /* SKIP */
+    /* SKIP (BẢO VỆ QUYỀN) */
     if (command === "skip" || command === "s") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice để sử dụng lệnh này.");
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền skip!");
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại hoặc Admin mới có quyền skip!");
 
       player.skip();
       return msg.reply(`⏭️ **${msg.author.displayName}** đã bỏ qua bài hát!`);
     }
 
-    /* STOP */
+    /* STOP (BẢO VỆ QUYỀN) */
     if (command === "stop") {
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền dừng phát!");
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại hoặc Admin mới có quyền dừng phát!");
       player.stop();
       return msg.reply("⏹️ Đã dừng nhạc.");
     }
 
-    /* VOLUME */
+    /* VOLUME (BẢO VỆ QUYỀN) */
     if (command === "volume" || command === "vol") {
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền chỉnh âm lượng!");
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại hoặc Admin mới có quyền chỉnh âm lượng!");
       const vol = Number.parseInt(query, 10);
       if (Number.isNaN(vol) || vol < 0 || vol > 200) return msg.reply("❌ Volume từ 0 đến 200.");
       player.setVolume(vol);
