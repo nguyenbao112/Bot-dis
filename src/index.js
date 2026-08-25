@@ -10,6 +10,7 @@ import { PlayerManager } from "ziplayer";
 import {
   YouTubePlugin,
   SpotifyPlugin,
+  SoundCloudPlugin,
   TTSPlugin,
 } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
@@ -61,7 +62,10 @@ const initPlayerManager = () => {
   if (manager) return;
   manager = new PlayerManager({
     plugins: [
-      new YouTubePlugin(),
+      new SoundCloudPlugin(),
+      new YouTubePlugin({
+        playerClients: ["TVHTML5", "ANDROID", "IOS"],
+      }),
       new SpotifyPlugin(),
       new TTSPlugin(),
       new InfinityPlugin(),
@@ -103,7 +107,7 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log("========================================");
   console.log("🤖 BOT MUSIC ĐÃ ONLINE SẴN SÀNG");
   console.log(`👤 ${readyClient.user.tag}`);
-  console.log("🎵 Nguồn hỗ trợ: YouTube, Spotify, Infinity");
+  console.log("🎵 Nguồn hỗ trợ: SoundCloud, YouTube, Spotify, Infinity");
   console.log("========================================");
 });
 
@@ -152,7 +156,7 @@ client.on(Events.MessageCreate, async (msg) => {
       const helpEmbed = new EmbedBuilder()
         .setColor("#0099ff")
         .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
-        .setDescription("Tiền tố lệnh là: `!`\nTrình phát hỗ trợ các nguồn: **YouTube, Spotify, Infinity**.")
+        .setDescription("Tiền tố lệnh là: `!`\nTrình phát hỗ trợ các nguồn: **SoundCloud, YouTube, Spotify, Infinity**.")
         .addFields(
           {
             name: "▶️ Phát Nhạc",
