@@ -5,6 +5,7 @@ import {
   GatewayIntentBits,
   EmbedBuilder,
   Events,
+  PermissionFlagsBits,
 } from "discord.js";
 import { PlayerManager } from "ziplayer";
 import {
@@ -61,7 +62,6 @@ let manager;
 const initPlayerManager = () => {
   if (manager) return;
 
-  // Sử dụng Client ID từ biến môi trường hoặc dùng ID dự phòng hoạt động sẵn
   const scClientId = process.env.SOUNDCLOUD_CLIENT_ID || "iZGeft3Standard223849384938493";
 
   manager = new PlayerManager({
@@ -171,11 +171,11 @@ client.on(Events.MessageCreate, async (msg) => {
               "`!scplay <tên bài/link>` (hoặc `!sc`): Tìm và phát nhạc từ SoundCloud.",
           },
           {
-            name: "🎛️ Điều Khiển Trình Phát",
+            name: "🎛️ Điều Khiển Trình Phát (Chỉ Người Gọi Bài/Admin)",
             value: 
               "`!pause`: Tạm dừng bài hát.\n" +
               "`!resume`: Tiếp tục phát nhạc.\n" +
-              "`!skip` (hoặc `!s`): Bỏ qua bài hiện tại (Chỉ dành cho người yêu cầu).\n" +
+              "`!skip` (hoặc `!s`): Bỏ qua bài hát.\n" +
               "`!stop`: Dừng phát và xóa hàng đợi.\n" +
               "`!volume <0-200>` (hoặc `!vol`): Chỉnh âm lượng bot.",
           },
@@ -240,6 +240,14 @@ client.on(Events.MessageCreate, async (msg) => {
       }
     };
 
+    /* HÀM KIỂM TRA QUYỀN ĐIỀU KHIỂN (REQUESTER HOẶC ADMIN) */
+    const isOwnerOrAdmin = () => {
+      const currentTrack = player?.currentTrack;
+      const isRequester = currentTrack?.requestedBy === msg.author.id;
+      const isAdmin = msg.member?.permissions.has(PermissionFlagsBits.Administrator);
+      return isRequester || isAdmin;
+    };
+
     /* JOIN */
     if (command === "join") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice trước.");
@@ -256,6 +264,7 @@ client.on(Events.MessageCreate, async (msg) => {
     /* LEAVE */
     if (command === "leave") {
       if (!player) return msg.reply("❌ Bot chưa ở trong phòng voice.");
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền buộc bot rời phòng!");
       player.destroy();
       return msg.reply("👋 Bot đã rời phòng voice.");
     }
@@ -304,6 +313,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
     /* PAUSE */
     if (command === "pause") {
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền tạm dừng!");
       if (!player.isPlaying) return msg.reply("❌ Nhạc không đang phát.");
       player.pause();
       return msg.reply("⏸️ Đã tạm dừng.");
@@ -311,6 +321,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
     /* RESUME */
     if (command === "resume") {
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền tiếp tục!");
       if (!player.isPaused) return msg.reply("❌ Nhạc đang phát rồi.");
       player.resume();
       return msg.reply("▶️ Đã phát tiếp.");
@@ -319,15 +330,7 @@ client.on(Events.MessageCreate, async (msg) => {
     /* SKIP */
     if (command === "skip" || command === "s") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice để sử dụng lệnh này.");
-      
-      const currentTrack = player.currentTrack;
-      if (!currentTrack) return msg.reply("❌ Không có bài hát nào đang phát.");
-
-      const isRequester = currentTrack.requestedBy === msg.author.id;
-
-      if (!isRequester) {
-        return msg.reply("🔒 Chỉ người đã yêu cầu bài hát này mới có quyền skip!");
-      }
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền skip!");
 
       player.skip();
       return msg.reply(`⏭️ **${msg.author.displayName}** đã bỏ qua bài hát!`);
@@ -335,12 +338,14 @@ client.on(Events.MessageCreate, async (msg) => {
 
     /* STOP */
     if (command === "stop") {
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền dừng phát!");
       player.stop();
       return msg.reply("⏹️ Đã dừng nhạc.");
     }
 
     /* VOLUME */
     if (command === "volume" || command === "vol") {
+      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền chỉnh âm lượng!");
       const vol = Number.parseInt(query, 10);
       if (Number.isNaN(vol) || vol < 0 || vol > 200) return msg.reply("❌ Volume từ 0 đến 200.");
       player.setVolume(vol);
