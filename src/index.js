@@ -1,44 +1,16 @@
-import "dotenv/config";
-import http from "http";
 import {
   Client,
   GatewayIntentBits,
   EmbedBuilder,
-  Events,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   PermissionFlagsBits,
+  Events,
 } from "discord.js";
 import { PlayerManager } from "ziplayer";
-import {
-  YouTubePlugin,
-  SpotifyPlugin,
-  SoundCloudPlugin,
-  TTSPlugin,
-} from "@ziplayer/plugin";
+import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
-
-/* =========================================================
-   CONFIG & KEEP-ALIVE SERVER (RENDER REQUIREMENT)
-========================================================= */
-
-const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
-
-if (!TOKEN) {
-  console.error("❌ Không tìm thấy DISCORD_TOKEN hoặc TOKEN trong .env");
-  process.exit(1);
-}
-
-const PORT = process.env.PORT || 10000;
-
-http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("Bot Discord Online 24/7!");
-}).listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Web server running on port ${PORT}`);
-});
-
-/* =========================================================
-   DISCORD CLIENT
-========================================================= */
 
 const client = new Client({
   intents: [
@@ -46,343 +18,666 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
   ],
-  rest: {
-    timeout: 30000,
-    retries: 5,
-  },
 });
 
-/* =========================================================
-   PLAYER MANAGER
-========================================================= */
-
-let manager;
-
-const initPlayerManager = () => {
-  if (manager) return;
-
-  // Sử dụng Client ID SoundCloud xịn / hợp lệ để tránh lỗi tự động fetch clientId
-  const scClientId = process.env.SOUNDCLOUD_CLIENT_ID || "LBC23966572134584289895627236310";
-
-  manager = new PlayerManager({
-    plugins: [
-      new SoundCloudPlugin({
-        clientId: scClientId,
-        clientIdFetcher: async () => scClientId, // Ép dùng ID dự phòng nếu fetch xịt
-      }),
-      new YouTubePlugin({
-        playerClients: ["TVHTML5", "ANDROID", "IOS"],
-      }),
-      new SpotifyPlugin(),
-      new TTSPlugin(),
-      new InfinityPlugin(),
-    ],
-    autoCleanup: false,
-    leaveOnEmpty: false,
-    leaveOnEnd: false,
-    extractorTimeout: 60000,
-  });
-
-  manager.on("trackStart", async (player, track) => {
-    console.log(`[${player.guildId}] ▶️ Đang phát: ${track?.title || "Unknown"}`);
-    await applyClarity(player);
-  });
-
-  manager.on("trackEnd", (player, track) => {
-    console.log(`[${player.guildId}] ⏹️ Kết thúc: ${track?.title || "Unknown"}`);
-  });
-
-  manager.on("queueEnd", (player) => {
-    console.log(`[${player.guildId}] 📭 Hàng đợi đã hết.`);
-  });
-
-  manager.on("playerError", (player, error, track) => {
-    console.error("========================================");
-    console.error(`❌ PLAYER ERROR [${player?.guildId || "unknown"}]`);
-    console.error("Track:", track?.title || "Không xác định");
-    console.error(error);
-    console.error("========================================");
-  });
-};
-
-/* =========================================================
-   READY
-========================================================= */
-
-client.once(Events.ClientReady, (readyClient) => {
-  initPlayerManager();
-  console.log("========================================");
-  console.log("🤖 BOT MUSIC ĐÃ ONLINE SẴN SÀNG");
-  console.log(`👤 ${readyClient.user.tag}`);
-  console.log("🎵 Nguồn hỗ trợ: SoundCloud, YouTube, Spotify, Infinity");
-  console.log("========================================");
+const manager = new PlayerManager({
+  plugins: [
+    new YouTubePlugin({ highWaterMark: 1 << 25 }),
+    new SpotifyPlugin(),
+    new InfinityPlugin(),
+  ],
+  autoCleanup: true,
+  extractorTimeout: 30000,
+  enableSearchCache: true,
 });
 
-client.on("error", (err) => console.error("❌ Client Error:", err));
+const voteState = new Map();
 
-/* =========================================================
-   EQUALIZER / FILTER
-========================================================= */
-
-const applyClarity = async (player) => {
-  if (!player) return false;
-
+function countListeners(guild, player) {
   try {
-    if (player.filter && typeof player.filter.applyFilter === "function") {
-      await player.filter.applyFilter("trebleboost");
-    }
-    return true;
-  } catch (error) {
-    console.warn("⚠️ Bỏ qua lỗi áp dụng EQ:", error?.message || error);
-    return true;
+    const botMember = guild.members.me;
+    const vc = botMember?.voice?.channel;
+    if (!vc) return 1;
+    return vc.members.filter((m) => !m.user.bot).size;
+  } catch {
+    return 1;
   }
-};
+}
 
-/* =========================================================
-   MESSAGE COMMAND
-========================================================= */
+function votesRequired(listenerCount) {
+  return Math.max(1, Math.ceil(listenerCount * 0.5));
+}
+
+function buildVoteEmbed(type, current, required, track) {
+  const action = type === "skip" ? "⏭ Skip" : "⏹ Stop";
+  const color = type === "skip" ? 0xf59e0b : 0xef4444;
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`${action} Vote`)
+    .setDescription(
+      `**${current}/${required}** votes needed to ${type}.\n` +
+        `Track: **${track?.title ?? "Unknown"}**`
+    )
+    .setFooter({ text: "Vote expires in 60 seconds" });
+}
+
+function buildVoteRow(guildId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`vote_yes_${guildId}`)
+      .setLabel("✅ Vote Yes")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`vote_cancel_${guildId}`)
+      .setLabel("❌ Cancel Vote")
+      .setStyle(ButtonStyle.Danger)
+  );
+}
+
+async function cleanupVote(guildId, channel, msgId) {
+  voteState.delete(guildId);
+  try {
+    const msg = await channel.messages.fetch(msgId);
+    await msg.delete().catch(() => {});
+  } catch {}
+}
+
+async function startVote(type, guild, channel, player, requesterId) {
+  if (voteState.has(guild.id)) {
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x6b7280)
+          .setDescription("⚠️ A vote is already in progress!"),
+      ],
+    });
+    return;
+  }
+
+  const track = player.currentTrack;
+  if (!track) {
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x6b7280)
+          .setDescription("❌ Nothing is playing right now."),
+      ],
+    });
+    return;
+  }
+
+  const listeners = countListeners(guild, player);
+  const required = votesRequired(listeners);
+  const voters = new Set([requesterId]);
+
+  if (voters.size >= required) {
+    if (type === "skip") player.skip();
+    else player.stop();
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x22c55e)
+          .setDescription(
+            type === "skip"
+              ? "⏭ Skipped! (only listener)"
+              : "⏹ Stopped! (only listener)"
+          ),
+      ],
+    });
+    return;
+  }
+
+  const embed = buildVoteEmbed(type, voters.size, required, track);
+  const row = buildVoteRow(guild.id);
+  const msg = await channel.send({ embeds: [embed], components: [row] });
+
+  voteState.set(guild.id, {
+    type,
+    voters,
+    required,
+    msgId: msg.id,
+    channelId: channel.id,
+    requesterId,
+    trackId: track.id,
+    timeout: setTimeout(async () => {
+      await cleanupVote(guild.id, channel, msg.id);
+      await channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x6b7280)
+            .setDescription("⌛ Vote expired — not enough votes."),
+        ],
+      });
+    }, 60_000),
+  });
+}
+
+manager.on("trackStart", async (player, track) => {
+  const channel = client.channels.cache.get(player.textChannelId);
+  if (!channel) return;
+
+  const requesterTag =
+    (await client.users.fetch(track.requestedBy).catch(() => null))?.tag ??
+    "Unknown";
+
+  const embed = new EmbedBuilder()
+    .setColor(0x6366f1)
+    .setTitle("🎵 Now Playing")
+    .setDescription(`**[${track.title}](${track.url})**`)
+    .setThumbnail(track.thumbnail ?? null)
+    .addFields(
+      {
+        name: "Duration",
+        value: track.isLive ? "🔴 LIVE" : formatDuration(track.duration),
+        inline: true,
+      },
+      { name: "Source", value: capitalize(track.source), inline: true },
+      { name: "Requested by", value: requesterTag, inline: true }
+    )
+    .setFooter({ text: "ZiPlayer • Crystal Audio" });
+
+  await channel.send({ embeds: [embed] });
+});
+
+manager.on("queueEnd", async (player) => {
+  const channel = client.channels.cache.get(player.textChannelId);
+  if (channel) {
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x8b5cf6)
+          .setDescription("✅ Queue finished. Leaving voice channel."),
+      ],
+    });
+  }
+});
+
+manager.on("playerError", async (player, error, track) => {
+  const channel = client.channels.cache.get(player.textChannelId);
+  if (channel) {
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xef4444)
+          .setTitle("❌ Playback Error")
+          .setDescription(
+            `Failed on **${track?.title ?? "Unknown"}**\n\`${error.message}\``
+          ),
+      ],
+    });
+  }
+});
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  const { customId, guild, user, channel } = interaction;
+  const guildId = guild?.id;
+  if (!guildId) return;
+
+  const player = manager.get(guildId);
+  const state = voteState.get(guildId);
+
+  if (customId === `vote_yes_${guildId}`) {
+    if (!state) {
+      return interaction.reply({ content: "No active vote.", ephemeral: true });
+    }
+
+    if (state.voters.has(user.id)) {
+      return interaction.reply({ content: "You already voted!", ephemeral: true });
+    }
+
+    const member = await guild.members.fetch(user.id);
+    const botVc = guild.members.me?.voice?.channel;
+    if (!botVc || member.voice.channelId !== botVc.id) {
+      return interaction.reply({
+        content: "You must be in the voice channel to vote!",
+        ephemeral: true,
+      });
+    }
+
+    state.voters.add(user.id);
+
+    const listeners = countListeners(guild, player);
+    const required = votesRequired(listeners);
+    state.required = required;
+
+    if (state.voters.size >= required) {
+      clearTimeout(state.timeout);
+      const type = state.type;
+      await cleanupVote(guildId, channel, state.msgId);
+
+      if (player) {
+        if (type === "skip") player.skip();
+        else player.stop();
+      }
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x22c55e)
+            .setDescription(
+              type === "skip"
+                ? "⏭ Vote passed! Skipping..."
+                : "⏹ Vote passed! Stopping..."
+            ),
+        ],
+      });
+    }
+
+    const updatedEmbed = buildVoteEmbed(
+      state.type,
+      state.voters.size,
+      required,
+      player?.currentTrack
+    );
+    try {
+      const msg = await channel.messages.fetch(state.msgId);
+      await msg.edit({ embeds: [updatedEmbed], components: [buildVoteRow(guildId)] });
+    } catch {}
+
+    return interaction.reply({
+      content: `✅ Vote counted! (${state.voters.size}/${required})`,
+      ephemeral: true,
+    });
+  }
+
+  if (customId === `vote_cancel_${guildId}`) {
+    if (!state) {
+      return interaction.reply({ content: "No active vote.", ephemeral: true });
+    }
+
+    const member = await guild.members.fetch(user.id);
+    const canCancel =
+      user.id === state.requesterId ||
+      member.permissions.has(PermissionFlagsBits.ManageChannels);
+
+    if (!canCancel) {
+      return interaction.reply({
+        content: "Only the vote starter or a moderator can cancel.",
+        ephemeral: true,
+      });
+    }
+
+    clearTimeout(state.timeout);
+    await cleanupVote(guildId, channel, state.msgId);
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder().setColor(0x6b7280).setDescription("🗑 Vote cancelled."),
+      ],
+    });
+  }
+});
 
 client.on(Events.MessageCreate, async (msg) => {
-  try {
-    if (!msg.guildId || msg.author.bot || typeof msg.content !== "string" || !msg.content.startsWith("!")) return;
+  if (!msg.guildId || msg.author.bot) return;
+  if (!msg.content.startsWith("!")) return;
 
-    const parts = msg.content.slice(1).trim().split(/\s+/);
-    const command = parts.shift()?.toLowerCase();
-    const query = parts.join(" ").trim();
+  const args = msg.content.slice(1).trim().split(/\s+/);
+  const command = args.shift().toLowerCase();
+  const query = args.join(" ");
+  const guild = msg.guild;
+  const member = msg.member;
+  const voiceChannel = member?.voice?.channel;
 
-    const musicCommands = [
-      "help", "h", "play", "p", "pause", "resume", 
-      "skip", "s", "stop", "volume", "vol", "filter", "clarity", 
-      "queue", "q", "nowplaying", "np", "join", "leave"
-    ];
+  async function getPlayer() {
+    const p = await manager.create(msg.guildId, {
+      lowPerformance: false,
+      preload: { enabled: true, autoDisableInLowPerformance: true },
+      crossfade: {
+        autoEnable: true,
+        autoDisableInLowPerformance: true,
+        durationMs: 4000,
+      },
+      smartTransition: {
+        enabled: true,
+        genreAware: true,
+        beatAlign: true,
+        baseDurationMs: 4500,
+      },
+      antiStuck: {
+        enabled: true,
+        maxRetries: 3,
+        retryDelayMs: 800,
+        reusePreloadFirst: true,
+        reduceQualityOnRetry: true,
+        controlledSkipThreshold: 3,
+      },
+      loudnessNormalization: {
+        enabled: true,
+        targetLUFS: -14,
+        maxBoostDb: 6,
+        maxCutDb: -6,
+        limiterCeiling: 0.95,
+      },
+    });
+    p.textChannelId = msg.channelId;
+    return p;
+  }
 
-    if (!musicCommands.includes(command)) return;
+  const reply = (embed) => msg.reply({ embeds: [embed] });
 
-    /* HELP */
-    if (command === "help" || command === "h") {
-      const helpEmbed = new EmbedBuilder()
-        .setColor("#0099ff")
-        .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
-        .setDescription("Tiền tố lệnh là: `!`\nTrình phát tự động hỗ trợ: **SoundCloud, YouTube, Spotify, Infinity**.")
-        .addFields(
-          {
-            name: "▶️ Phát Nhạc (Tất cả nguồn)",
-            value: "`!play <tên bài/link>` (hoặc `!p`): Phát nhạc tự động từ SoundCloud, YT, Spotify...",
-          },
-          {
-            name: "🎛️ Quyền Điều Khiển (Chỉ Người Gọi Bài/Admin)",
-            value: 
-              "`!pause`: Tạm dừng bài hát.\n" +
-              "`!resume`: Tiếp tục phát nhạc.\n" +
-              "`!skip` (hoặc `!s`): Bỏ qua bài hát.\n" +
-              "`!stop`: Dừng phát và xóa hàng đợi.\n" +
-              "`!volume <0-200>` (hoặc `!vol`): Chỉnh âm lượng bot.",
-          },
-          {
-            name: "✨ Tối Ưu Âm Thanh & Hàng Đợi",
-            value: 
-              "`!clarity` (hoặc `!filter`): Bật bộ lọc làm rõ âm thanh Clarity EQ.\n" +
-              "`!queue` (hoặc `!q`): Xem danh sách hàng đợi 10 bài tiếp theo.\n" +
-              "`!nowplaying` (hoặc `!np`): Xem bài hát đang phát.",
-          },
-          {
-            name: "📌 Kênh Voice",
-            value: 
-              "`!join`: Cho bot vào phòng voice của bạn.\n" +
-              "`!leave`: Cho bot rời phòng voice.",
-          }
-        )
-        .setFooter({ text: "Chúc bạn nghe nhạc vui vẻ!" });
+  switch (command) {
+    case "play":
+    case "p": {
+      if (!voiceChannel) return reply(errEmbed("You need to be in a voice channel!"));
+      if (!query) return reply(errEmbed("Provide a song name or URL."));
 
-      return msg.reply({ embeds: [helpEmbed] });
+      const player = await getPlayer();
+      if (!player.connection) await player.connect(voiceChannel);
+
+      const success = await player.play(query, msg.author.id);
+      if (!success) return reply(errEmbed("Could not find or play that track."));
+
+      if (player.isPlaying && player.currentTrack?.requestedBy !== msg.author.id) {
+        return reply(
+          new EmbedBuilder()
+            .setColor(0x6366f1)
+            .setDescription(`📋 Added to queue: **${query}**`)
+        );
+      }
+      break;
     }
 
-    if (!manager) initPlayerManager();
-
-    const voiceChannel = msg.member?.voice?.channel;
-    let player = manager.get(msg.guildId);
-
-    const getOrCreatePlayer = async () => {
-      if (!player) {
-        player = await manager.create(msg.guildId, {
-          volume: 100,
-          loudnessNormalization: { enabled: false },
-          antiStuck: {
-            enabled: true,
-            maxRetries: 3,
-            retryDelayMs: 1000,
-            reusePreloadFirst: true,
-            reduceQualityOnRetry: true,
-          },
-          leaveOnEmpty: false,
-          leaveOnEnd: false,
-          extractorTimeout: 60000,
-          lowPerformance: false,
-          preload: {
-            enabled: true,
-            autoDisableInLowPerformance: true,
-          },
-        });
-      }
-      return player;
-    };
-
-    /* HÀM KẾT NỐI VOICE AN TOÀN - TRÁNH LỖI XUNG ĐỘT */
-    const connectToVoice = async (activePlayer, channel) => {
-      if (!activePlayer.connection || activePlayer.connection.state?.status === "destroyed") {
-        await activePlayer.connect(channel, {
-          selfDeaf: true,
-          group: client.user.id,
-          adapterCreator: channel.guild.voiceAdapterCreator,
-        });
-      }
-    };
-
-    /* HÀM KIỂM TRA QUYỀN ĐIỀU KHIỂN (KHÓA QUYỀN CHẶT CHẼ) */
-    const isOwnerOrAdmin = () => {
-      const currentTrack = player?.currentTrack;
-      const isRequester = currentTrack?.requestedBy === msg.author.id;
-      const isAdmin = msg.member?.permissions.has(PermissionFlagsBits.Administrator);
-      return isRequester || isAdmin;
-    };
-
-    /* JOIN */
-    if (command === "join") {
-      if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice trước.");
-      try {
-        const activePlayer = await getOrCreatePlayer();
-        await connectToVoice(activePlayer, voiceChannel);
-        return msg.reply(`📌 Đã vào **${voiceChannel.name}**`);
-      } catch (error) {
-        console.error("❌ Lỗi JOIN Voice:", error);
-        return msg.reply("❌ Không thể vào voice. Hãy kiểm tra quyền của Bot!");
-      }
-    }
-
-    /* LEAVE (BẢO VỆ QUYỀN) */
-    if (command === "leave") {
-      if (!player) return msg.reply("❌ Bot chưa ở trong phòng voice.");
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại hoặc Admin mới có quyền cho bot rời phòng!");
-      player.destroy();
-      return msg.reply("👋 Bot đã rời phòng voice.");
-    }
-
-    /* PLAY / P (GỘP CHUNG TẤT CẢ NGUỒN PHÁT) */
-    if (command === "play" || command === "p") {
-      if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice trước.");
-      if (!query) return msg.reply("❌ Dùng: `!play <tên bài/link SoundCloud, YT, Spotify>`");
-
-      const activePlayer = await getOrCreatePlayer();
-
-      try {
-        await connectToVoice(activePlayer, voiceChannel);
-      } catch (error) {
-        console.error("❌ Lỗi KẾT NỐI VOICE:", error);
-        if (!activePlayer.isPlaying && !activePlayer.currentTrack) {
-          return msg.reply("❌ Không kết nối được voice. Kiểm tra lại quyền Connect/Speak của bot!");
-        }
-      }
-
-      const replyMsg = await msg.reply("🔎 Đang tìm và tải nhạc...");
-
-      try {
-        let searchQuery = query.trim();
-
-        if (searchQuery.includes("soundcloud.com") && !searchQuery.startsWith("http")) {
-          searchQuery = `scsearch:${searchQuery}`;
-        }
-
-        const result = await activePlayer.play(searchQuery, msg.author.id);
-
-        if (result?.type === "PLAYLIST" || Array.isArray(result?.tracks)) {
-          const count = result?.tracks?.length || 0;
-          return replyMsg.edit(`🎶 Đã thêm playlist **${count} bài** vào hàng đợi.`);
-        }
-
-        const trackName = result?.track?.title || result?.title || activePlayer.currentTrack?.title || query;
-        return replyMsg.edit(`▶️ Đã phát/thêm bài hát:\n**${trackName}**`);
-      } catch (error) {
-        console.error("❌ PLAY ERROR:", error);
-        return replyMsg.edit("❌ Không thể tải/phát bài hát này.");
-      }
-    }
-
-    if (!player) return msg.reply("❌ Hiện tại bot chưa hoạt động trong Server này.");
-
-    /* PAUSE (BẢO VỆ QUYỀN) */
-    if (command === "pause") {
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền tạm dừng!");
-      if (!player.isPlaying) return msg.reply("❌ Nhạc không đang phát.");
+    case "pause": {
+      const player = manager.get(msg.guildId);
+      if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
       player.pause();
-      return msg.reply("⏸️ Đã tạm dừng.");
+      return reply(new EmbedBuilder().setColor(0xf59e0b).setDescription("⏸ Paused."));
     }
 
-    /* RESUME (BẢO VỆ QUYỀN) */
-    if (command === "resume") {
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hoặc Admin mới có quyền tiếp tục!");
-      if (!player.isPaused) return msg.reply("❌ Nhạc đang phát rồi.");
+    case "resume":
+    case "r": {
+      const player = manager.get(msg.guildId);
+      if (!player?.isPaused) return reply(errEmbed("Nothing is paused!"));
       player.resume();
-      return msg.reply("▶️ Đã phát tiếp.");
+      return reply(new EmbedBuilder().setColor(0x22c55e).setDescription("▶️ Resumed."));
     }
 
-    /* SKIP (BẢO VỆ QUYỀN) */
-    if (command === "skip" || command === "s") {
-      if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice để sử dụng lệnh này.");
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại hoặc Admin mới có quyền skip!");
+    case "skip":
+    case "s": {
+      const player = manager.get(msg.guildId);
+      if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
 
-      player.skip();
-      return msg.reply(`⏭️ **${msg.author.displayName}** đã bỏ qua bài hát!`);
-    }
-
-    /* STOP (BẢO VỆ QUYỀN) */
-    if (command === "stop") {
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại hoặc Admin mới có quyền dừng phát!");
-      player.stop();
-      return msg.reply("⏹️ Đã dừng nhạc.");
-    }
-
-    /* VOLUME (BẢO VỆ QUYỀN) */
-    if (command === "volume" || command === "vol") {
-      if (!isOwnerOrAdmin()) return msg.reply("🔒 Chỉ người yêu cầu bài hát hiện tại hoặc Admin mới có quyền chỉnh âm lượng!");
-      const vol = Number.parseInt(query, 10);
-      if (Number.isNaN(vol) || vol < 0 || vol > 200) return msg.reply("❌ Volume từ 0 đến 200.");
-      player.setVolume(vol);
-      return msg.reply(`🔊 Volume: **${vol}%**`);
-    }
-
-    /* CLARITY / FILTER */
-    if (command === "clarity" || command === "filter") {
-      if (!player.currentTrack && !player.isPlaying) {
-        return msg.reply("❌ Không có bài hát nào đang phát để áp dụng bộ lọc.");
-      }
-      await applyClarity(player);
-      return msg.reply("✨ Đã bật **Clarity EQ** – dải âm thanh đã được tối ưu!");
-    }
-
-    /* QUEUE */
-    if (command === "queue" || command === "q") {
-      const tracks = player.upcomingTracks?.slice(0, 10) || [];
-      const queueList = tracks.length ? tracks.map((t, i) => `**${i + 1}.** ${t.title}`).join("\n") : "Hàng đợi trống.";
-      return msg.reply({ embeds: [new EmbedBuilder().setTitle("🎶 Hàng đợi").setDescription(queueList)] });
-    }
-
-    /* NOW PLAYING */
-    if (command === "nowplaying" || command === "np") {
       const track = player.currentTrack;
-      if (!track) return msg.reply("❌ Không có bài nào đang phát.");
-      return msg.reply(`🎵 Đang phát: **${track.title}**`);
+      const isRequester = track?.requestedBy === msg.author.id;
+
+      if (isRequester) {
+        player.skip();
+        return reply(
+          new EmbedBuilder()
+            .setColor(0x22c55e)
+            .setDescription("⏭ Skipped! (you requested this track)")
+        );
+      }
+
+      await startVote("skip", guild, msg.channel, player, msg.author.id);
+      break;
     }
 
-  } catch (error) {
-    console.error("🔥 ERROR:", error);
+    case "stop": {
+      const player = manager.get(msg.guildId);
+      if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
+
+      const track = player.currentTrack;
+      const isRequester = track?.requestedBy === msg.author.id;
+      const isMod = member.permissions.has(PermissionFlagsBits.ManageChannels);
+
+      if (isRequester || isMod) {
+        player.stop();
+        voteState.delete(msg.guildId);
+        return reply(
+          new EmbedBuilder().setColor(0xef4444).setDescription("⏹ Stopped and queue cleared.")
+        );
+      }
+
+      await startVote("stop", guild, msg.channel, player, msg.author.id);
+      break;
+    }
+
+    case "voteskip":
+    case "vs": {
+      const player = manager.get(msg.guildId);
+      if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
+      await startVote("skip", guild, msg.channel, player, msg.author.id);
+      break;
+    }
+
+    case "votestop":
+    case "vst": {
+      const player = manager.get(msg.guildId);
+      if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
+      await startVote("stop", guild, msg.channel, player, msg.author.id);
+      break;
+    }
+
+    case "volume":
+    case "vol": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply(errEmbed("No player active."));
+      const vol = parseInt(query);
+      if (isNaN(vol) || vol < 0 || vol > 200)
+        return reply(errEmbed("Volume must be 0–200."));
+      player.setVolume(vol);
+      return reply(
+        new EmbedBuilder()
+          .setColor(0x6366f1)
+          .setDescription(`🔊 Volume set to **${vol}%**`)
+      );
+    }
+
+    case "loop":
+    case "l": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply(errEmbed("No player active."));
+      const modes = ["off", "track", "queue"];
+      const mode = query.toLowerCase();
+      if (!modes.includes(mode)) return reply(errEmbed("Modes: `off`, `track`, `queue`"));
+      player.loop(mode);
+      return reply(
+        new EmbedBuilder().setColor(0x8b5cf6).setDescription(`🔁 Loop set to **${mode}**`)
+      );
+    }
+
+    case "shuffle": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply(errEmbed("No player active."));
+      player.shuffle();
+      return reply(
+        new EmbedBuilder().setColor(0x8b5cf6).setDescription("🔀 Queue shuffled!")
+      );
+    }
+
+    case "prev":
+    case "previous": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply(errEmbed("No player active."));
+      await player.previous();
+      return reply(
+        new EmbedBuilder().setColor(0x6366f1).setDescription("⏮ Playing previous track.")
+      );
+    }
+
+    case "queue":
+    case "q": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply(errEmbed("No player active."));
+
+      const current = player.currentTrack;
+      const upcoming = player.upcomingTracks.slice(0, 10);
+
+      if (!current && upcoming.length === 0) return reply(errEmbed("Queue is empty!"));
+
+      const embed = new EmbedBuilder().setColor(0x6366f1).setTitle("🎵 Music Queue");
+
+      if (current) {
+        embed.addFields({
+          name: "▶️ Now Playing",
+          value: `**${current.title}** — ${formatDuration(current.duration)}`,
+        });
+      }
+
+      if (upcoming.length > 0) {
+        embed.addFields({
+          name: "📋 Up Next",
+          value: upcoming
+            .map((t, i) => `\`${i + 1}.\` ${t.title} — ${formatDuration(t.duration)}`)
+            .join("\n"),
+        });
+      }
+
+      embed.setFooter({ text: `${player.queueSize} track(s) in queue` });
+      return reply(embed);
+    }
+
+    case "nowplaying":
+    case "np": {
+      const player = manager.get(msg.guildId);
+      if (!player?.currentTrack) return reply(errEmbed("Nothing is playing!"));
+
+      const track = player.currentTrack;
+      const bar = player.getProgressBar({
+        size: 20,
+        barChar: "▬",
+        progressChar: "🔘",
+        timeFormat: "compact",
+        showPercentage: true,
+      });
+      const time = player.getTime();
+
+      const embed = new EmbedBuilder()
+        .setColor(0x6366f1)
+        .setTitle("🎵 Now Playing")
+        .setDescription(`**[${track.title}](${track.url})**`)
+        .setThumbnail(track.thumbnail ?? null)
+        .addFields(
+          { name: "Progress", value: `\`${bar}\``, inline: false },
+          {
+            name: "Time",
+            value: `${time.formatted.current} / ${track.isLive ? "🔴 LIVE" : time.formatted.total}`,
+            inline: true,
+          },
+          { name: "Volume", value: `${player.volume}%`, inline: true },
+          { name: "Loop", value: capitalize(player.queue?.loopMode ?? "off"), inline: true }
+        );
+
+      return reply(embed);
+    }
+
+    case "remove":
+    case "rm": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply(errEmbed("No player active."));
+      const idx = parseInt(query) - 1;
+      if (isNaN(idx) || idx < 0) return reply(errEmbed("Provide a valid track number."));
+      player.queue.remove(idx);
+      return reply(
+        new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setDescription(`🗑 Removed track #${idx + 1} from queue.`)
+      );
+    }
+
+    case "seek": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply(errEmbed("No player active."));
+      const ms = parseSeek(query);
+      if (ms === null) return reply(errEmbed("Format: `!seek 1:30` or `!seek 90`"));
+      await player.seek(ms);
+      return reply(
+        new EmbedBuilder().setColor(0x6366f1).setDescription(`⏩ Seeked to **${query}**`)
+      );
+    }
+
+    case "filter":
+    case "fx": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply(errEmbed("No player active."));
+      const validFilters = [
+        "bassboost","trebleboost","nightcore","lofi","vaporwave",
+        "echo","reverb","chorus","karaoke","normalize","compressor","limiter",
+      ];
+      if (query === "clear" || query === "reset") {
+        await player.filter.clearAll();
+        return reply(
+          new EmbedBuilder().setColor(0x22c55e).setDescription("✅ All filters cleared.")
+        );
+      }
+      if (!validFilters.includes(query))
+        return reply(errEmbed(`Valid filters: \`${validFilters.join(", ")}\`, or \`clear\``));
+      await player.filter.applyFilter(query);
+      return reply(
+        new EmbedBuilder().setColor(0x8b5cf6).setDescription(`✨ Filter **${query}** applied.`)
+      );
+    }
+
+    case "help":
+    case "h": {
+      const embed = new EmbedBuilder()
+        .setColor(0x6366f1)
+        .setTitle("🎵 Music Bot Commands")
+        .addFields(
+          { name: "!play <query>", value: "Play a song or add to queue", inline: true },
+          { name: "!pause / !resume", value: "Pause or resume playback", inline: true },
+          { name: "!skip", value: "Skip (vote if not requester)", inline: true },
+          { name: "!stop", value: "Stop (vote if not requester)", inline: true },
+          { name: "!voteskip / !vs", value: "Force a skip vote", inline: true },
+          { name: "!votestop / !vst", value: "Force a stop vote", inline: true },
+          { name: "!queue / !q", value: "Show queue", inline: true },
+          { name: "!nowplaying / !np", value: "Now playing info", inline: true },
+          { name: "!volume <0-200>", value: "Set volume", inline: true },
+          { name: "!loop <off|track|queue>", value: "Set loop mode", inline: true },
+          { name: "!shuffle", value: "Shuffle queue", inline: true },
+          { name: "!previous", value: "Play previous track", inline: true },
+          { name: "!seek <time>", value: "Seek to position (1:30 or 90)", inline: true },
+          { name: "!remove <#>", value: "Remove track from queue", inline: true },
+          { name: "!filter <name|clear>", value: "Apply audio filter", inline: true }
+        )
+        .setFooter({ text: "Vote threshold = 50% of listeners. Requester can always skip/stop." });
+      return reply(embed);
+    }
   }
 });
 
-/* =========================================================
-   LOGIN
-========================================================= */
+function errEmbed(msg) {
+  return new EmbedBuilder().setColor(0xef4444).setDescription(`❌ ${msg}`);
+}
 
-client.login(TOKEN).catch((err) => {
-  console.error("❌ LỖI LOGIN DISCORD:", err);
+function formatDuration(ms) {
+  if (!ms || ms <= 0) return "0:00";
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}:${pad(m % 60)}:${pad(s % 60)}`;
+  return `${m}:${pad(s % 60)}`;
+}
+
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
+function capitalize(str) {
+  return str ? str.charAt(0).toUpperCase() + str.slice(1) : "";
+}
+
+function parseSeek(str) {
+  if (!str) return null;
+  if (str.includes(":")) {
+    const parts = str.split(":").map(Number);
+    if (parts.some(isNaN)) return null;
+    if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
+    if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+  }
+  const sec = parseFloat(str);
+  if (isNaN(sec)) return null;
+  return sec * 1000;
+}
+
+client.once(Events.ClientReady, (c) => {
+  console.log(`✅ Ready — logged in as ${c.user.tag}`);
 });
+
+client.login(process.env.DISCORD_TOKEN);
