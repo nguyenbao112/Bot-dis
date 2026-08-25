@@ -28,7 +28,41 @@ http
   });
 
 /* =========================================================
-   2. KHỞI TẠO DISCORD CLIENT
+   2. HÀM BỔ TRỢ (HELPER FUNCTIONS)
+========================================================= */
+function errEmbed(message) {
+  return new EmbedBuilder().setColor(0xef4444).setDescription(`❌ ${message}`);
+}
+
+function formatDuration(ms) {
+  if (!ms || isNaN(ms)) return "00:00";
+  const seconds = Math.floor((ms / 1000) % 60);
+  const minutes = Math.floor((ms / (1000 * 60)) % 60);
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+
+  const pad = (num) => String(num).padStart(2, "0");
+  return hours > 0
+    ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+function capitalize(str) {
+  if (!str) return "Unknown";
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function parseSeek(input) {
+  if (!input) return null;
+  if (/^\d+$/.test(input)) return parseInt(input, 10) * 1000;
+  const parts = input.split(":").map((p) => parseInt(p, 10));
+  if (parts.some(isNaN)) return null;
+  if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
+  if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+  return null;
+}
+
+/* =========================================================
+   3. KHỞI TẠO DISCORD CLIENT & PLAYER MANAGER
 ========================================================= */
 const client = new Client({
   intents: [
@@ -172,6 +206,9 @@ async function startVote(type, guild, channel, player, requesterId) {
   });
 }
 
+/* =========================================================
+   4. SỰ KIỆN MUSIC PLAYER
+========================================================= */
 manager.on("trackStart", async (player, track) => {
   const channel = client.channels.cache.get(player.textChannelId);
   if (!channel) return;
@@ -228,6 +265,9 @@ manager.on("playerError", async (player, error, track) => {
   }
 });
 
+/* =========================================================
+   5. SỰ KIỆN NÚT BẤM (BUTTON INTERACTION)
+========================================================= */
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
 
@@ -328,6 +368,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       ],
     });
   }
+});
+
+/* =========================================================
+   6. SỰ KIỆN XỬ LÝ LỆNH (MESSAGE COMMANDS)
+========================================================= */
+client.on(Events.ClientReady, () => {
+  console.log(`🤖 Bot online với tên: ${client.user.tag}`);
 });
 
 client.on(Events.MessageCreate, async (msg) => {
@@ -615,8 +662,8 @@ client.on(Events.MessageCreate, async (msg) => {
       const player = manager.get(msg.guildId);
       if (!player) return reply(errEmbed("No player active."));
       const validFilters = [
-        "bassboost","trebleboost","nightcore","lofi","vaporwave",
-        "echo","reverb","chorus","karaoke","normalize","compressor","limiter",
+        "bassboost", "trebleboost", "nightcore", "lofi", "vaporwave",
+        "echo", "reverb", "chorus", "karaoke", "normalize", "compressor", "limiter",
       ];
       if (query === "clear" || query === "reset") {
         await player.filter.clearAll();
@@ -636,70 +683,62 @@ client.on(Events.MessageCreate, async (msg) => {
     case "h": {
       const embed = new EmbedBuilder()
         .setColor(0x6366f1)
-        .setTitle("🎵 Music Bot Commands")
-        .addFields(
-          { name: "!play <query>", value: "Play a song or add to queue", inline: true },
-          { name: "!pause / !resume", value: "Pause or resume playback", inline: true },
-          { name: "!skip", value: "Skip (vote if not requester)", inline: true },
-          { name: "!stop", value: "Stop (vote if not requester)", inline: true },
-          { name: "!voteskip / !vs", value: "Force a skip vote", inline: true },
-          { name: "!votestop / !vst", value: "Force a stop vote", inline: true },
-          { name: "!queue / !q", value: "Show queue", inline: true },
-          { name: "!nowplaying / !np", value: "Now playing info", inline: true },
-          { name: "!volume <0-200>", value: "Set volume", inline: true },
-          { name: "!loop <off|track|queue>", value: "Set loop mode", inline: true },
-          { name: "!shuffle", value: "Shuffle queue", inline: true },
-          { name: "!previous", value: "Play previous track", inline: true },
-          { name: "!seek <time>", value: "Seek to position (1:30 or 90)", inline: true },
-          { name: "!remove <#>", value: "Remove track from queue", inline: true },
-          { name: "!filter <name|clear>", value: "Apply audio filter", inline: true }
+        .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
+        .setDescription(
+          "Chào mừng bạn đến với **Crystal Audio Bot**! Dưới đây là danh sách toàn bộ lệnh khả dụng. Tiền tố lệnh mặc định là `!`\n\n" +
+          "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
-        .setFooter({ text: "Vote threshold = 50% of listeners. Requester can always skip/stop." });
+        .setThumbnail(client.user?.displayAvatarURL() || null)
+        .addFields(
+          {
+            name: "▶️  Phát & Tạm Dừng Nhạc",
+            value:
+              "`!play <tên/link>` (`!p`) • Phát nhạc hoặc thêm vào hàng đợi\n" +
+              "`!pause` • Tạm dừng bài hát đang phát\n" +
+              "`!resume` (`!r`) • Tiếp tục phát bài hát",
+            inline: false,
+          },
+          {
+            name: "⏭️  Bỏ Qua & Dừng (Có Tính Năng Vote)",
+            value:
+              "`!skip` (`!s`) • Bỏ qua bài hát (Requestor skip ngay, người khác cần vote)\n" +
+              "`!stop` • Dừng nhạc & xóa hàng đợi (Mod/Requestor dừng ngay)\n" +
+              "`!voteskip` (`!vs`) • Mở cuộc biểu quyết skip bài hát\n" +
+              "`!votestop` (`!vst`) • Mở cuộc biểu quyết dừng nhạc",
+            inline: false,
+          },
+          {
+            name: "🎛️  Tùy Chỉnh & Bộ Lọc Âm Thanh",
+            value:
+              "`!volume <0-200>` (`!vol`) • Điều chỉnh âm lượng bot\n" +
+              "`!filter <tên|clear>` (`!fx`) • Bật bộ lọc EQ (`bassboost`, `nightcore`, `lofi`...)\n" +
+              "`!seek <thời gian>` • Nhảy đến thời gian chỉ định (`!seek 1:30` hoặc `!seek 90`)",
+            inline: false,
+          },
+          {
+            name: "📋  Quản Lý Hàng Đợi (Queue)",
+            value:
+              "`!queue` (`!q`) • Xem danh sách hàng đợi hiện tại\n" +
+              "`!nowplaying` (`!np`) • Xem chi tiết bài hát đang phát + thanh tiến trình\n" +
+              "`!loop <off|track|queue>` (`!l`) • Lặp lại bài hát hoặc toàn bộ hàng đợi\n" +
+              "`!shuffle` • Trộn bài ngẫu nhiên trong hàng đợi\n" +
+              "`!previous` (`!prev`) • Phát lại bài hát trước đó\n" +
+              "`!remove <STT>` (`!rm`) • Xóa 1 bài khỏi hàng đợi theo số thứ tự",
+            inline: false,
+          }
+        )
+        .setFooter({
+          text: "💡 Mẹo: Ngưỡng biểu quyết (Vote) mặc định là 50% số người nghe trong Voice Channel.",
+          iconURL: msg.author.displayAvatarURL(),
+        })
+        .setTimestamp();
+
       return reply(embed);
     }
   }
 });
 
 /* =========================================================
-   3. HÀM BỔ TRỢ & ĐĂNG NHẬP BOT
+   7. ĐĂNG NHẬP BOT
 ========================================================= */
-function errEmbed(msg) {
-  return new EmbedBuilder().setColor(0xef4444).setDescription(`❌ ${msg}`);
-}
-
-function formatDuration(ms) {
-  if (!ms || ms <= 0) return "0:00";
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const h = Math.floor(m / 60);
-  if (h > 0) return `${h}:${pad(m % 60)}:${pad(s % 60)}`;
-  return `${m}:${pad(s % 60)}`;
-}
-
-function pad(n) {
-  return String(n).padStart(2, "0");
-}
-
-function capitalize(str) {
-  return str ? str.charAt(0).toUpperCase() + str.slice(1) : "";
-}
-
-function parseSeek(str) {
-  if (!str) return null;
-  const parts = str.split(":").map(Number);
-  if (parts.some(isNaN)) return null;
-  if (parts.length === 1) return parts[0] * 1000;
-  if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
-  if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
-  return null;
-}
-
-const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
-if (!TOKEN) {
-  console.error("❌ Không tìm thấy Token trong Environment Variables!");
-  process.exit(1);
-}
-
-client.login(TOKEN).catch((err) => {
-  console.error("❌ Đăng nhập bot thất bại:", err);
-});
+client.login(process.env.DISCORD_TOKEN);
