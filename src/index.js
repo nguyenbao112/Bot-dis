@@ -344,7 +344,7 @@ client.on(Events.MessageCreate, async (msg) => {
 
 client.login(TOKEN);
 
-const port = process.env.PORT || 3333;
+const port = process.env.PORT || 3000;
 
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
