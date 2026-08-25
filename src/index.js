@@ -1,3 +1,4 @@
+import "ffmpeg-static"; // Thêm thư viện ffmpeg tĩnh để xử lý âm thanh trên Render
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -26,9 +27,12 @@ if (!TOKEN) {
 
 // --- WEB SERVER KEEP-ALIVE ---
 http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
   res.write("Bot ZiPlayer is Running!");
   res.end();
-}).listen(process.env.PORT || 3000);
+}).listen(process.env.PORT || 3000, () => {
+  console.log("🌐 Keep-alive server đã sẵn sàng tại cổng 3000");
+});
 
 const formatTime = (ms) => {
   if (ms == null || isNaN(ms) || ms < 0) return "00:00";
@@ -478,7 +482,6 @@ client.on(Events.MessageCreate, async (msg) => {
       } else return msg.reply("❌ Không hỗ trợ resume.");
     }
 
-    // --- KHÔI PHỤC BẢO VỆ QUYỀN HẠN DÙNG SKIP ---
     if (command === "skip" || command === "s") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice.");
       const currentTrack = player.currentTrack;
@@ -496,7 +499,6 @@ client.on(Events.MessageCreate, async (msg) => {
       return msg.reply(`⏭️ **${msg.author.displayName}** đã bỏ qua bài hát!`);
     }
 
-    // --- KHÔI PHỤC BẢO VỆ QUYỀN HẠN DÙNG STOP ---
     if (command === "stop") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice.");
       const currentTrack = player.currentTrack;
@@ -512,7 +514,6 @@ client.on(Events.MessageCreate, async (msg) => {
       return msg.reply("⏹️ Đã dừng phát nhạc.");
     }
 
-    // --- BỔ SUNG KHỐI LỆNH CLARITY FILTER ---
     if (command === "clarity") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice.");
       if (!player.currentTrack) return msg.reply("❌ Không có bài hát nào đang phát.");
