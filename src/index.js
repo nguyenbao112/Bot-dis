@@ -1,4 +1,4 @@
-import "ffmpeg-static"; // Thêm thư viện ffmpeg tĩnh để xử lý âm thanh trên Render
+import "ffmpeg-static";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -20,9 +20,12 @@ import { InfinityPlugin } from "@ziplayer/infinity";
 const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const YT_COOKIE = process.env.YT_COOKIE || "";
 
+console.log("🔍 Đang kiểm tra cấu hình môi trường...");
 if (!TOKEN) {
-  console.error("❌ Không tìm thấy DISCORD_TOKEN hoặc TOKEN trong môi trường.");
+  console.error("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN hoặc TOKEN trong Environment Variables của Render!");
   process.exit(1);
+} else {
+  console.log("✅ Đã tìm thấy DISCORD_TOKEN. Tiến hành khởi tạo Bot...");
 }
 
 // --- WEB SERVER KEEP-ALIVE ---
@@ -219,14 +222,14 @@ const manager = new PlayerManager({
 client.once(Events.ClientReady, (readyClient) => {
   console.log("========================================");
   console.log("🤖 BOT MUSIC ĐÃ ONLINE SẴN SÀNG");
-  console.log(`👤 ${readyClient.user.tag}`);
+  console.log(`👤 Tên Bot: ${readyClient.user.tag}`);
   console.log("🎵 Nguồn hỗ trợ: YouTube, Spotify, SoundCloud, Infinity");
   console.log("========================================");
 });
 
-client.on("error", (err) => console.error("Discord client error:", err));
-process.on("unhandledRejection", (err) => console.error("UnhandledRejection:", err));
-process.on("uncaughtException", (err) => console.error("UncaughtException:", err));
+client.on("error", (err) => console.error("❌ Discord Client Error:", err));
+process.on("unhandledRejection", (err) => console.error("❌ UnhandledRejection:", err));
+process.on("uncaughtException", (err) => console.error("❌ UncaughtException:", err));
 
 // --- XỬ LÝ LỖI CLARITY FILTER ---
 const applyClarity = async (player) => {
@@ -545,4 +548,13 @@ client.on(Events.MessageCreate, async (msg) => {
   }
 });
 
-client.login(TOKEN);
+// --- THÊM LOG BẮT LỖI ĐĂNG NHẬP TRỰC TIẾP ---
+console.log("🔄 Đang gửi yêu cầu đăng nhập tới Discord...");
+client.login(TOKEN)
+  .then(() => {
+    console.log("🔑 Mã Token xác thực thành công!");
+  })
+  .catch((err) => {
+    console.error("❌ ĐĂNG NHẬP THẤT BẠI - BẢNG LỖI DISCORD:");
+    console.error(err);
+  });
