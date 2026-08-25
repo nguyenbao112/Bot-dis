@@ -20,12 +20,10 @@ import { InfinityPlugin } from "@ziplayer/infinity";
 const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 const YT_COOKIE = process.env.YT_COOKIE || "";
 
-console.log("🔍 Đang kiểm tra cấu hình môi trường...");
+console.log("🔍 Đang kiểm tra biến môi trường...");
 if (!TOKEN) {
-  console.error("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN hoặc TOKEN trong Environment Variables của Render!");
+  console.error("❌ LỖI NGHIÊM TRỌNG: Không tìm thấy DISCORD_TOKEN trong Environment Variables!");
   process.exit(1);
-} else {
-  console.log("✅ Đã tìm thấy DISCORD_TOKEN. Tiến hành khởi tạo Bot...");
 }
 
 // --- WEB SERVER KEEP-ALIVE ---
@@ -185,6 +183,7 @@ const createProgressBar = (currentMs, totalMs, size = 15) => {
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
+// --- KHỞI TẠO CLIENT VỚI REST TIMEOUT ĐỂ TRÁNH TREO TRÊN RENDER ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -192,6 +191,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+  rest: {
+    timeout: 15000,
+    retries: 3,
+  },
 });
 
 // --- CẤU HÌNH YOUTUBE & THỨ TỰ PLUGIN ---
@@ -548,13 +551,11 @@ client.on(Events.MessageCreate, async (msg) => {
   }
 });
 
-// --- THÊM LOG BẮT LỖI ĐĂNG NHẬP TRỰC TIẾP ---
-console.log("🔄 Đang gửi yêu cầu đăng nhập tới Discord...");
+// --- TIẾN HÀNH ĐĂNG NHẬP VỚI BẮT LỖI CHI TIẾT ---
+console.log("🔄 Đang gửi yêu cầu kết nối tới Discord Gateway...");
 client.login(TOKEN)
-  .then(() => {
-    console.log("🔑 Mã Token xác thực thành công!");
-  })
+  .then(() => console.log("🔑 Xác thực thành công! Đang đợi sự kiện Ready..."))
   .catch((err) => {
-    console.error("❌ ĐĂNG NHẬP THẤT BẠI - BẢNG LỖI DISCORD:");
+    console.error("❌ ĐĂNG NHẬP THẤT BẠI:");
     console.error(err);
   });
