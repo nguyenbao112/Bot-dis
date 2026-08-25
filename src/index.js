@@ -1,3 +1,5 @@
+import "dotenv/config";
+import http from "http";
 import {
   Client,
   GatewayIntentBits,
@@ -12,6 +14,22 @@ import { PlayerManager } from "ziplayer";
 import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
 
+/* =========================================================
+   1. KHỞI TẠO WEB SERVER ĐỂ TRÁNH LỖI CRASH TRÊN RENDER
+========================================================= */
+const PORT = process.env.PORT || 10000;
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Bot Discord Online 24/7!");
+  })
+  .listen(PORT, "0.0.0.0", () => {
+    console.log(`🌐 Web server running on port ${PORT}`);
+  });
+
+/* =========================================================
+   2. KHỞI TẠO DISCORD CLIENT
+========================================================= */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -642,6 +660,9 @@ client.on(Events.MessageCreate, async (msg) => {
   }
 });
 
+/* =========================================================
+   3. HÀM BỔ TRỢ & ĐĂNG NHẬP BOT
+========================================================= */
 function errEmbed(msg) {
   return new EmbedBuilder().setColor(0xef4444).setDescription(`❌ ${msg}`);
 }
@@ -665,19 +686,20 @@ function capitalize(str) {
 
 function parseSeek(str) {
   if (!str) return null;
-  if (str.includes(":")) {
-    const parts = str.split(":").map(Number);
-    if (parts.some(isNaN)) return null;
-    if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
-    if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
-  }
-  const sec = parseFloat(str);
-  if (isNaN(sec)) return null;
-  return sec * 1000;
+  const parts = str.split(":").map(Number);
+  if (parts.some(isNaN)) return null;
+  if (parts.length === 1) return parts[0] * 1000;
+  if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
+  if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+  return null;
 }
 
-client.once(Events.ClientReady, (c) => {
-  console.log(`✅ Ready — logged in as ${c.user.tag}`);
-});
+const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
+if (!TOKEN) {
+  console.error("❌ Không tìm thấy Token trong Environment Variables!");
+  process.exit(1);
+}
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(TOKEN).catch((err) => {
+  console.error("❌ Đăng nhập bot thất bại:", err);
+});
