@@ -16,7 +16,7 @@ import {
 import { InfinityPlugin } from "@ziplayer/infinity";
 
 /* =========================================================
-   CONFIG
+   CONFIG & KEEP-ALIVE HTTP SERVER (RENDER PORT BINDING)
 ========================================================= */
 
 const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
@@ -25,6 +25,17 @@ if (!TOKEN) {
   console.error("❌ Không tìm thấy DISCORD_TOKEN hoặc TOKEN trong .env");
   process.exit(1);
 }
+
+const PORT = process.env.PORT || 10000;
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end("Bot Discord Online 24/7!");
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🌐 Web server running on port ${PORT}`);
+});
 
 /* =========================================================
    DISCORD CLIENT
@@ -37,36 +48,71 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+  rest: {
+    timeout: 30000,
+    retries: 5,
+  },
 });
 
 /* =========================================================
    PLAYER MANAGER
 ========================================================= */
 
-const manager = new PlayerManager({
-  plugins: [
-    new YouTubePlugin(),
-    new SpotifyPlugin(),
-    new TTSPlugin(),
-    new InfinityPlugin(),
-  ],
-  autoCleanup: false,
-  leaveOnEmpty: false,
-  leaveOnEnd: false,
-  extractorTimeout: 60000,
-});
+let manager;
+
+const initPlayerManager = () => {
+  if (manager) return;
+  manager = new PlayerManager({
+    plugins: [
+      new YouTubePlugin({
+        playerClients: ["TVHTML5", "ANDROID", "IOS"],
+      }),
+      new SpotifyPlugin(),
+      new TTSPlugin(),
+      new InfinityPlugin(),
+    ],
+    autoCleanup: false,
+    leaveOnEmpty: false,
+    leaveOnEnd: false,
+    extractorTimeout: 60000,
+  });
+
+  manager.on("trackStart", async (player, track) => {
+    console.log(`[${player.guildId}] ▶️ Đang phát: ${track?.title || "Unknown"}`);
+    await applyClarity(player);
+  });
+
+  manager.on("trackEnd", (player, track) => {
+    console.log(`[${player.guildId}] ⏹️ Kết thúc: ${track?.title || "Unknown"}`);
+  });
+
+  manager.on("queueEnd", (player) => {
+    console.log(`[${player.guildId}] 📭 Hàng đợi đã hết.`);
+  });
+
+  manager.on("playerError", (player, error, track) => {
+    console.error("========================================");
+    console.error(`❌ PLAYER ERROR [${player?.guildId || "unknown"}]`);
+    console.error("Track:", track?.title || "Không xác định");
+    console.error(error);
+    console.error("========================================");
+  });
+};
 
 /* =========================================================
    READY
 ========================================================= */
 
 client.once(Events.ClientReady, (readyClient) => {
+  initPlayerManager();
   console.log("========================================");
   console.log("🤖 BOT MUSIC ĐÃ ONLINE SẴN SÀNG");
   console.log(`👤 ${readyClient.user.tag}`);
   console.log("🎵 Nguồn hỗ trợ: YouTube, Spotify, Infinity");
   console.log("========================================");
 });
+
+client.on("error", (err) => console.error("❌ Client Error:", err));
 
 /* =========================================================
    EQUALIZER / FILTER
@@ -87,37 +133,12 @@ const applyClarity = async (player) => {
 };
 
 /* =========================================================
-   EVENTS
-========================================================= */
-
-manager.on("trackStart", async (player, track) => {
-  console.log(`[${player.guildId}] ▶️ Đang phát: ${track?.title || "Unknown"}`);
-  await applyClarity(player);
-});
-
-manager.on("trackEnd", (player, track) => {
-  console.log(`[${player.guildId}] ⏹️ Kết thúc: ${track?.title || "Unknown"}`);
-});
-
-manager.on("queueEnd", (player) => {
-  console.log(`[${player.guildId}] 📭 Hàng đợi đã hết.`);
-});
-
-manager.on("playerError", (player, error, track) => {
-  console.error("========================================");
-  console.error(`❌ PLAYER ERROR [${player?.guildId || "unknown"}]`);
-  console.error("Track:", track?.title || "Không xác định");
-  console.error(error);
-  console.error("========================================");
-});
-
-/* =========================================================
    MESSAGE COMMAND
 ========================================================= */
 
 client.on(Events.MessageCreate, async (msg) => {
   try {
-    if (!msg.guildId || msg.author.bot || !msg.content.startsWith("!")) return;
+    if (!msg.guildId || msg.author.bot || typeof msg.content !== "string" || !msg.content.startsWith("!")) return;
 
     const parts = msg.content.slice(1).trim().split(/\s+/);
     const command = parts.shift()?.toLowerCase();
@@ -171,6 +192,8 @@ client.on(Events.MessageCreate, async (msg) => {
 
       return msg.reply({ embeds: [helpEmbed] });
     }
+
+    if (!manager) initPlayerManager();
 
     const voiceChannel = msg.member?.voice?.channel;
 
@@ -339,16 +362,9 @@ client.on(Events.MessageCreate, async (msg) => {
 });
 
 /* =========================================================
-   LOGIN & WEB SERVER FOR RENDER
+   LOGIN
 ========================================================= */
 
-client.login(TOKEN);
-
-const port = process.env.PORT || 3000;
-
-http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Bot Discord Online 24/7!");
-}).listen(port, () => {
-  console.log(`🌐 Web server running on port ${port}`);
+client.login(TOKEN).catch((err) => {
+  console.error("❌ LỖI LOGIN DISCORD:", err);
 });
