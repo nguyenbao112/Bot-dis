@@ -25,16 +25,14 @@ http
   });
 
 /* =========================================================
-   2. HÀM XỬ LÝ VÀ CHUYỂN ĐỔI COOKIE NETSCAPE
+   2. HÀM XỬ LÝ COOKIE NETSCAPE
 ========================================================= */
 function parseNetscapeCookie(cookieRaw) {
   if (!cookieRaw) return "";
-  // Nếu cookie đã ở dạng header "key=val; key2=val2"
   if (!cookieRaw.includes("\t") && cookieRaw.includes("=")) {
     return cookieRaw.trim();
   }
 
-  // Chuyển từ định dạng Netscape (cookies.txt) sang dạng Header String
   const lines = cookieRaw.split("\n");
   const cookies = [];
   for (const line of lines) {
@@ -49,31 +47,11 @@ function parseNetscapeCookie(cookieRaw) {
   return cookies.join("; ");
 }
 
-// Nếu bạn không dùng biến môi trường Render, có thể dán trực tiếp chuỗi Netscape vào giữa hai dấu `` ở dưới
-const RAW_COOKIE = process.env.YT_COOKIE || `
-.youtube.com	TRUE	/	TRUE	1787988280	GPS	1
-.youtube.com	TRUE	/	TRUE	1822546590	PREF	f6=40000000&tz=Asia.Saigon
-.youtube.com	TRUE	/	TRUE	1819522589	__Secure-1PSIDTS	sidts-CjUBXMw41YejFAqpzVEi3r8vWyT-8I0ttNYiDpkEDtAM32OrbZa9uSBj99NBIa6KlEOtdVQcHBAA
-.youtube.com	TRUE	/	TRUE	1819522589	__Secure-3PSIDTS	sidts-CjUBXMw41YejFAqpzVEi3r8vWyT-8I0ttNYiDpkEDtAM32OrbZa9uSBj99NBIa6KlEOtdVQcHBAA
-.youtube.com	TRUE	/	FALSE	1822546589	HSID	AlzGNN5GLQ_s5EZaY
-.youtube.com	TRUE	/	TRUE	1822546589	SSID	AaH7WuLjIxpibBgiJ
-.youtube.com	TRUE	/	FALSE	1822546589	APISID	Y6lNr8DXLZWr1ffQ/AjuUTSTDb4KlXQM5Y
-.youtube.com	TRUE	/	TRUE	1822546589	SAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
-.youtube.com	TRUE	/	TRUE	1822546589	__Secure-1PAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
-.youtube.com	TRUE	/	TRUE	1822546589	__Secure-3PAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
-.youtube.com	TRUE	/	FALSE	1822546589	SID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPeaiAfccW8YV0g2QHXwkbdwACgYKAfwSARISFQHGX2MilDc0HmxxU10JBnB4aMZLuRoVAUF8yKoNfAwNijxtSK8T24yoN0810076
-.youtube.com	TRUE	/	TRUE	1822546589	__Secure-1PSID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPNA5MGdPr9Q7P4p1YS6ycZAACgYKAXQSARISFQHGX2MiPIgGlv_F4rVgOW7yqeJjbhoVAUF8yKovfghXmXc_BIbPN5mgaJNF0076
-.youtube.com	TRUE	/	TRUE	1822546589	__Secure-3PSID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPa1DxViXJFaQL_TkUU17m6QACgYKAa8SARISFQHGX2MiDTQbanLPNpOqd0S9IzkkyBoVAUF8yKoS9JGPILD374mqCBWXXJV30076
-.youtube.com	TRUE	/	TRUE	1822546589	LOGIN_INFO	AFmmF2swRgIhAKJtaS7QJYyEjGqDL5joJpMi2QsCWyUbK8FL9nGVUVyaAiEAkFpenOac1UVe_HiQ3n7Uajfsj6P02n-Mtiaxirrp5DQ:QUQ3MjNmejR4alpITXQ5ajZZN1hkTFJ4NDVicDhBZEp6cHhTTFRkc09ZRFl5TGxhOWZaa0pGbS1MQzdtaG9aVUxJM1JLU2U3TEVXbTlBbTlkSXVkUWUtdGZYeVdQaWt1YVBBOFJHUEdZaGx4MHdscWdKUy11MlkyallwTk5pTUl3YkVZMjZ6TGpYZEVIckpsRnY2Z2N6d1ZYU3VDeEZnZTZ3
-.youtube.com	TRUE	/	FALSE	1819522592	SIDCC	AKEyXzU01kp87k0-3TKE-i_h300LKlB-bZF-f8_K4hXvBXqto2B6dfRzQVzlDYDswlZ0bTTx
-.youtube.com	TRUE	/	TRUE	1819522592	__Secure-1PSIDCC	AKEyXzWw3Hoa4EM24wj6_s8iq-rwq0V5dQ69sn93oFxpj_MZ31fUrPBcM4RNK39DdI7LL3jYZQ
-.youtube.com	TRUE	/	TRUE	1819522592	__Secure-3PSIDCC	AKEyXzWQ5tfbJbjMn0Kf-0s0xhi--amIqm4umYo3Mef7pRQZX1Ii1_PAroJCLFgt4aDrFORvlA
-`;
-
+const RAW_COOKIE = process.env.YT_COOKIE || "";
 const FORMATTED_COOKIE = parseNetscapeCookie(RAW_COOKIE);
 
 /* =========================================================
-   3. HÀM BỔ TRỢ (HELPER FUNCTIONS)
+   3. HELPER FUNCTIONS
 ========================================================= */
 function errEmbed(message) {
   return new EmbedBuilder().setColor(0xef4444).setDescription(`❌ ${message}`);
@@ -140,13 +118,15 @@ const manager = new PlayerManager({
       highWaterMark: 1 << 26,
       quality: "highestaudio",
       cookies: FORMATTED_COOKIE,
+      // Tắt SABR để khắc phục hoàn toàn lỗi "No suitable formats found"
       sabrOptions: {
-        enabled: true,
+        enabled: false,
       },
       ytdlOptions: {
         filter: "audioonly",
         quality: "highestaudio",
         highWaterMark: 1 << 26,
+        dlChunkSize: 0,
         requestOptions: {
           headers: {
             "User-Agent":
@@ -224,7 +204,7 @@ manager.on("playerError", async (player, error, track) => {
 });
 
 /* =========================================================
-   6. SỰ KIỆN XỬ LÝ LỆNH DISCORD
+   6. SỰ KIỆN XỬ LÝ LỆNH (MESSAGE COMMANDS)
 ========================================================= */
 client.on(Events.ClientReady, () => {
   console.log(`🤖 Bot online với tên: ${client.user.tag}`);
@@ -257,7 +237,6 @@ client.on(Events.MessageCreate, async (msg) => {
     return p;
   }
 
-  // Quyền riêng tư: Chỉ người gọi bài hoặc Admin mới được Pause/Resume/Skip/Stop
   function isOwnerOrMod(player) {
     const track = player?.currentTrack;
     if (!track) return false;
