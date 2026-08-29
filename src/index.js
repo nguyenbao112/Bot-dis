@@ -25,7 +25,55 @@ http
   });
 
 /* =========================================================
-   2. HÀM BỔ TRỢ (HELPER FUNCTIONS)
+   2. HÀM XỬ LÝ VÀ CHUYỂN ĐỔI COOKIE NETSCAPE
+========================================================= */
+function parseNetscapeCookie(cookieRaw) {
+  if (!cookieRaw) return "";
+  // Nếu cookie đã ở dạng header "key=val; key2=val2"
+  if (!cookieRaw.includes("\t") && cookieRaw.includes("=")) {
+    return cookieRaw.trim();
+  }
+
+  // Chuyển từ định dạng Netscape (cookies.txt) sang dạng Header String
+  const lines = cookieRaw.split("\n");
+  const cookies = [];
+  for (const line of lines) {
+    if (line.startsWith("#") || !line.trim()) continue;
+    const parts = line.split("\t");
+    if (parts.length >= 7) {
+      const name = parts[5].trim();
+      const value = parts[6].trim();
+      cookies.push(`${name}=${value}`);
+    }
+  }
+  return cookies.join("; ");
+}
+
+// Nếu bạn không dùng biến môi trường Render, có thể dán trực tiếp chuỗi Netscape vào giữa hai dấu `` ở dưới
+const RAW_COOKIE = process.env.YT_COOKIE || `
+.youtube.com	TRUE	/	TRUE	1787988280	GPS	1
+.youtube.com	TRUE	/	TRUE	1822546590	PREF	f6=40000000&tz=Asia.Saigon
+.youtube.com	TRUE	/	TRUE	1819522589	__Secure-1PSIDTS	sidts-CjUBXMw41YejFAqpzVEi3r8vWyT-8I0ttNYiDpkEDtAM32OrbZa9uSBj99NBIa6KlEOtdVQcHBAA
+.youtube.com	TRUE	/	TRUE	1819522589	__Secure-3PSIDTS	sidts-CjUBXMw41YejFAqpzVEi3r8vWyT-8I0ttNYiDpkEDtAM32OrbZa9uSBj99NBIa6KlEOtdVQcHBAA
+.youtube.com	TRUE	/	FALSE	1822546589	HSID	AlzGNN5GLQ_s5EZaY
+.youtube.com	TRUE	/	TRUE	1822546589	SSID	AaH7WuLjIxpibBgiJ
+.youtube.com	TRUE	/	FALSE	1822546589	APISID	Y6lNr8DXLZWr1ffQ/AjuUTSTDb4KlXQM5Y
+.youtube.com	TRUE	/	TRUE	1822546589	SAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
+.youtube.com	TRUE	/	TRUE	1822546589	__Secure-1PAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
+.youtube.com	TRUE	/	TRUE	1822546589	__Secure-3PAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
+.youtube.com	TRUE	/	FALSE	1822546589	SID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPeaiAfccW8YV0g2QHXwkbdwACgYKAfwSARISFQHGX2MilDc0HmxxU10JBnB4aMZLuRoVAUF8yKoNfAwNijxtSK8T24yoN0810076
+.youtube.com	TRUE	/	TRUE	1822546589	__Secure-1PSID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPNA5MGdPr9Q7P4p1YS6ycZAACgYKAXQSARISFQHGX2MiPIgGlv_F4rVgOW7yqeJjbhoVAUF8yKovfghXmXc_BIbPN5mgaJNF0076
+.youtube.com	TRUE	/	TRUE	1822546589	__Secure-3PSID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPa1DxViXJFaQL_TkUU17m6QACgYKAa8SARISFQHGX2MiDTQbanLPNpOqd0S9IzkkyBoVAUF8yKoS9JGPILD374mqCBWXXJV30076
+.youtube.com	TRUE	/	TRUE	1822546589	LOGIN_INFO	AFmmF2swRgIhAKJtaS7QJYyEjGqDL5joJpMi2QsCWyUbK8FL9nGVUVyaAiEAkFpenOac1UVe_HiQ3n7Uajfsj6P02n-Mtiaxirrp5DQ:QUQ3MjNmejR4alpITXQ5ajZZN1hkTFJ4NDVicDhBZEp6cHhTTFRkc09ZRFl5TGxhOWZaa0pGbS1MQzdtaG9aVUxJM1JLU2U3TEVXbTlBbTlkSXVkUWUtdGZYeVdQaWt1YVBBOFJHUEdZaGx4MHdscWdKUy11MlkyallwTk5pTUl3YkVZMjZ6TGpYZEVIckpsRnY2Z2N6d1ZYU3VDeEZnZTZ3
+.youtube.com	TRUE	/	FALSE	1819522592	SIDCC	AKEyXzU01kp87k0-3TKE-i_h300LKlB-bZF-f8_K4hXvBXqto2B6dfRzQVzlDYDswlZ0bTTx
+.youtube.com	TRUE	/	TRUE	1819522592	__Secure-1PSIDCC	AKEyXzWw3Hoa4EM24wj6_s8iq-rwq0V5dQ69sn93oFxpj_MZ31fUrPBcM4RNK39DdI7LL3jYZQ
+.youtube.com	TRUE	/	TRUE	1819522592	__Secure-3PSIDCC	AKEyXzWQ5tfbJbjMn0Kf-0s0xhi--amIqm4umYo3Mef7pRQZX1Ii1_PAroJCLFgt4aDrFORvlA
+`;
+
+const FORMATTED_COOKIE = parseNetscapeCookie(RAW_COOKIE);
+
+/* =========================================================
+   3. HÀM BỔ TRỢ (HELPER FUNCTIONS)
 ========================================================= */
 function errEmbed(message) {
   return new EmbedBuilder().setColor(0xef4444).setDescription(`❌ ${message}`);
@@ -58,7 +106,6 @@ function parseSeek(input) {
   return null;
 }
 
-// Hàm dọn dẹp link YouTube khỏi các tham số thừa làm lỗi plugin
 function cleanQuery(input) {
   if (!input) return input;
   if (input.includes("youtube.com") || input.includes("youtu.be")) {
@@ -75,7 +122,7 @@ function cleanQuery(input) {
 }
 
 /* =========================================================
-   3. KHỞI TẠO DISCORD CLIENT & PLAYER MANAGER
+   4. KHỞI TẠO DISCORD CLIENT & PLAYER MANAGER
 ========================================================= */
 const client = new Client({
   intents: [
@@ -92,17 +139,19 @@ const manager = new PlayerManager({
     new YouTubePlugin({
       highWaterMark: 1 << 26,
       quality: "highestaudio",
-      // Cấu hình mã hóa đường truyền tránh YouTube phát hiện bot
+      cookies: FORMATTED_COOKIE,
+      sabrOptions: {
+        enabled: true,
+      },
       ytdlOptions: {
         filter: "audioonly",
         quality: "highestaudio",
         highWaterMark: 1 << 26,
-        dlChunkSize: 0,
         requestOptions: {
           headers: {
             "User-Agent":
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
+            Cookie: FORMATTED_COOKIE,
           },
         },
       },
@@ -116,7 +165,7 @@ const manager = new PlayerManager({
 });
 
 /* =========================================================
-   4. SỰ KIỆN MUSIC PLAYER
+   5. SỰ KIỆN MUSIC PLAYER
 ========================================================= */
 manager.on("trackStart", async (player, track) => {
   const channel = client.channels.cache.get(player.textChannelId);
@@ -175,7 +224,7 @@ manager.on("playerError", async (player, error, track) => {
 });
 
 /* =========================================================
-   5. SỰ KIỆN XỬ LÝ LỆNH (MESSAGE COMMANDS)
+   6. SỰ KIỆN XỬ LÝ LỆNH DISCORD
 ========================================================= */
 client.on(Events.ClientReady, () => {
   console.log(`🤖 Bot online với tên: ${client.user.tag}`);
@@ -208,7 +257,7 @@ client.on(Events.MessageCreate, async (msg) => {
     return p;
   }
 
-  // Hàm kiểm tra quyền tác giả bài hát hoặc Admin
+  // Quyền riêng tư: Chỉ người gọi bài hoặc Admin mới được Pause/Resume/Skip/Stop
   function isOwnerOrMod(player) {
     const track = player?.currentTrack;
     if (!track) return false;
@@ -230,7 +279,7 @@ client.on(Events.MessageCreate, async (msg) => {
       if (!player.connection) await player.connect(voiceChannel);
 
       const success = await player.play(cleanedQuery, msg.author.id);
-      if (!success) return reply(errEmbed("Could not find or play that track. Try searching by song name instead of link."));
+      if (!success) return reply(errEmbed("Could not find or play that track. Try searching by song name!"));
 
       if (player.isPlaying && player.currentTrack?.requestedBy !== msg.author.id) {
         return reply(
@@ -335,16 +384,6 @@ client.on(Events.MessageCreate, async (msg) => {
       );
     }
 
-    case "prev":
-    case "previous": {
-      const player = manager.get(msg.guildId);
-      if (!player) return reply(errEmbed("No player active."));
-      await player.previous();
-      return reply(
-        new EmbedBuilder().setColor(0x6366f1).setDescription("⏮ Playing previous track.")
-      );
-    }
-
     case "queue":
     case "q": {
       const player = manager.get(msg.guildId);
@@ -411,64 +450,22 @@ client.on(Events.MessageCreate, async (msg) => {
       return reply(embed);
     }
 
-    case "remove":
-    case "rm": {
-      const player = manager.get(msg.guildId);
-      if (!player) return reply(errEmbed("No player active."));
-      const idx = parseInt(query) - 1;
-      if (isNaN(idx) || idx < 0) return reply(errEmbed("Provide a valid track number."));
-      player.queue.remove(idx);
-      return reply(
-        new EmbedBuilder()
-          .setColor(0xf59e0b)
-          .setDescription(`🗑 Removed track #${idx + 1} from queue.`)
-      );
-    }
-
-    case "seek": {
-      const player = manager.get(msg.guildId);
-      if (!player) return reply(errEmbed("No player active."));
-      const ms = parseSeek(query);
-      if (ms === null) return reply(errEmbed("Format: `!seek 1:30` or `!seek 90`"));
-      await player.seek(ms);
-      return reply(
-        new EmbedBuilder().setColor(0x6366f1).setDescription(`⏩ Seeked to **${query}**`)
-      );
-    }
-
     case "help":
     case "h": {
       const embed = new EmbedBuilder()
         .setColor(0x6366f1)
-        .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
-        .setDescription(
-          "Chào mừng bạn đến với **Crystal Audio Bot**! Dưới đây là danh sách toàn bộ lệnh khả dụng:\n\n" +
-          "🔒 *Lưu ý: Các lệnh Pause, Resume, Skip, Stop chỉ người bật bài hát mới có quyền dùng.*"
-        )
+        .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG")
+        .setDescription("Chỉ người bật bài hát mới có quyền `!skip`, `!stop`, `!pause`, `!resume`.")
         .addFields(
           {
-            name: "▶️  Điều Khiển Nhạc",
-            value:
-              "`!play <tên/link>` (`!p`) • Phát nhạc hoặc thêm vào hàng đợi\n" +
-              "`!pause` • Tạm dừng (Chỉ người phát bài mới dùng được)\n" +
-              "`!resume` (`!r`) • Tiếp tục phát (Chỉ người phát bài mới dùng được)\n" +
-              "`!skip` (`!s`) • Bỏ qua bài hát (Chỉ người phát bài mới dùng được)\n" +
-              "`!stop` • Dừng phát nhạc (Chỉ người phát bài mới dùng được)",
-            inline: false,
+            name: "▶️ Điều Khiển",
+            value: "`!play <tên/link>` • Phát nhạc\n`!pause` • Tạm dừng\n`!resume` • Tiếp tục\n`!skip` • Bỏ qua\n`!stop` • Dừng phát",
           },
           {
-            name: "📋  Quản Lý Hàng Đợi (Queue)",
-            value:
-              "`!queue` (`!q`) • Xem danh sách hàng đợi hiện tại\n" +
-              "`!nowplaying` (`!np`) • Xem chi tiết bài hát đang phát\n" +
-              "`!loop <off|track|queue>` (`!l`) • Lặp lại bài hát/hàng đợi\n" +
-              "`!shuffle` • Trộn bài ngẫu nhiên\n" +
-              "`!previous` (`!prev`) • Phát lại bài trước đó\n" +
-              "`!remove <STT>` (`!rm`) • Xóa bài khỏi hàng đợi",
-            inline: false,
+            name: "📋 Hàng Đợi",
+            value: "`!queue` • Xem hàng đợi\n`!nowplaying` • Bài hát hiện tại\n`!volume <0-200>` • Âm lượng",
           }
-        )
-        .setFooter({ text: "Crystal Audio • Private Control System" });
+        );
 
       return reply(embed);
     }
@@ -476,6 +473,6 @@ client.on(Events.MessageCreate, async (msg) => {
 });
 
 /* =========================================================
-   6. ĐĂNG NHẬP BOT
+   7. ĐĂNG NHẬP BOT
 ========================================================= */
 client.login(process.env.DISCORD_TOKEN);
