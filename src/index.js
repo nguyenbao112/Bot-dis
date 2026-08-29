@@ -76,7 +76,10 @@ const client = new Client({
 
 const manager = new PlayerManager({
   plugins: [
-    new YouTubePlugin({ highWaterMark: 1 << 25 }),
+    new YouTubePlugin({ 
+      highWaterMark: 1 << 26, // Tăng buffer lên 64MB giúp âm thanh mượt hơn
+      quality: "highestaudio" 
+    }),
     new SpotifyPlugin(),
     new InfinityPlugin(),
   ],
@@ -389,35 +392,18 @@ client.on(Events.MessageCreate, async (msg) => {
   const voiceChannel = member?.voice?.channel;
 
   async function getPlayer() {
+    // Tối ưu cấu hình Player để xử lý luồng mượt mà, loại bỏ rè tiếng do quá tải CPU
     const p = await manager.create(msg.guildId, {
-      lowPerformance: false,
-      preload: { enabled: true, autoDisableInLowPerformance: true },
-      crossfade: {
-        autoEnable: true,
-        autoDisableInLowPerformance: true,
-        durationMs: 4000,
-      },
-      smartTransition: {
-        enabled: true,
-        genreAware: true,
-        beatAlign: true,
-        baseDurationMs: 4500,
-      },
+      lowPerformance: true, // Bật chế độ hiệu năng thấp để giảm tải CPU
+      preload: { enabled: true, autoDisableInLowPerformance: false },
+      crossfade: { enabled: false }, // Tắt crossfade để tránh xung đột luồng audio
+      smartTransition: { enabled: false }, // Tắt chuyển bài thông minh giảm lag
       antiStuck: {
         enabled: true,
         maxRetries: 3,
-        retryDelayMs: 800,
-        reusePreloadFirst: true,
-        reduceQualityOnRetry: true,
-        controlledSkipThreshold: 3,
+        retryDelayMs: 1000,
       },
-      loudnessNormalization: {
-        enabled: true,
-        targetLUFS: -14,
-        maxBoostDb: 6,
-        maxCutDb: -6,
-        limiterCeiling: 0.95,
-      },
+      loudnessNormalization: { enabled: false }, // Tắt chuẩn hóa âm lượng (nguyên nhân chính gây rè)
     });
     p.textChannelId = msg.channelId;
     return p;
