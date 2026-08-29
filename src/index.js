@@ -12,22 +12,31 @@ import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
 
 /* =========================================================
-   1. KIỂM TRA ĐIỀU KIỆN MÔI TRƯỜNG & KHỞI TẠO WEB SERVER
+   1. KIỂM TRA MÔI TRƯỜNG & KHỞI TẠO WEB SERVER (CHỐNG CRASH)
 ========================================================= */
-if (!process.env.DISCORD_TOKEN) {
-  console.error("❌ LỖI NGHIÊM TRỌNG: Chưa cấu hình DISCORD_TOKEN trong Environment!");
+const token = process.env.DISCORD_TOKEN?.trim();
+if (!token) {
+  console.error("❌ ERROR: Chưa cài đặt DISCORD_TOKEN trong mục Environment của Render!");
   process.exit(1);
 }
 
 const PORT = process.env.PORT || 10000;
-http
-  .createServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("ZiPlayer Bot Online 24/7!");
-  })
-  .listen(PORT, "0.0.0.0", () => {
-    console.log(`🌐 Web server running on port ${PORT}`);
-  });
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end("ZiPlayer Bot Online 24/7!");
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🌐 Web server đang chạy ở cổng ${PORT}`);
+});
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.log("⚠️ Cổng đã được sử dụng, tiếp tục chạy bot...");
+  } else {
+    console.error("❌ Lỗi Server:", err);
+  }
+});
 
 /* =========================================================
    2. XỬ LÝ COOKIE YOUTUBE NETSCAPE
@@ -70,7 +79,7 @@ const BACKUP_COOKIE = `.youtube.com	TRUE	/	TRUE	1787988280	GPS	1
 const FORMATTED_COOKIE = parseNetscapeCookie(process.env.YT_COOKIE || BACKUP_COOKIE);
 
 /* =========================================================
-   3. HÀM TRỢ GIÚP & CHUẨN HÓA DỮ LIỆU
+   3. HELPER FUNCTIONS
 ========================================================= */
 function errEmbed(message) {
   return new EmbedBuilder().setColor(0xef4444).setDescription(`❌ ${message}`);
@@ -108,7 +117,7 @@ function cleanQuery(input) {
 }
 
 /* =========================================================
-   4. KHỞI TẠO PLAYER MANAGER VỚI CẤU HÌNH CẮT GỌM RAM/CPU
+   4. KHỞI TẠO DISCORD CLIENT & PLAYER MANAGER
 ========================================================= */
 const client = new Client({
   intents: [
@@ -150,7 +159,7 @@ const manager = new PlayerManager({
 });
 
 /* =========================================================
-   5. EVENT LISTENER PHÁT NHẠC KHÔNG TRÔI SỰ KIỆN
+   5. SỰ KIỆN PLAYER
 ========================================================= */
 manager.on("trackStart", async (player, track) => {
   const channel = client.channels.cache.get(player.textChannelId);
@@ -172,7 +181,7 @@ manager.on("trackStart", async (player, track) => {
       { name: "📻 Nguồn", value: track.source?.toUpperCase() || "UNKNOWN", inline: true },
       { name: "👤 Người yêu cầu", value: requester ? requester.tag : "Không rõ", inline: true }
     )
-    .setFooter({ text: "ZiPlayer Core Engine • Optimized for Render Free" });
+    .setFooter({ text: "ZiPlayer Core Engine • Render Ready" });
 
   await channel.send({ embeds: [embed] });
 });
@@ -205,10 +214,10 @@ manager.on("playerError", async (player, error, track) => {
 });
 
 /* =========================================================
-   6. BỘ LỆNH ĐẦY ĐỦ CHO DISCORD BOT
+   6. SỰ KIỆN DISCORD BOT
 ========================================================= */
 client.on(Events.ClientReady, () => {
-  console.log(`🤖 Bot sẵn sàng dưới tên: ${client.user.tag}`);
+  console.log(`🤖 Bot kết nối thành công: ${client.user.tag}`);
 });
 
 client.on(Events.MessageCreate, async (msg) => {
@@ -315,7 +324,7 @@ client.on(Events.MessageCreate, async (msg) => {
       if (!player?.currentTrack) return reply(errEmbed("Không có nhạc đang phát!"));
       if (!checkPermission(player)) return reply(errEmbed("Bạn không có quyền tua nhạc!"));
       const seconds = parseInt(query);
-      if (isNaN(seconds)) return reply(errEmbed("Cú pháp: `!seek <số_giây>` (Ví dụ: `!seek 60` để tua đến phút 1)"));
+      if (isNaN(seconds)) return reply(errEmbed("Cú pháp: `!seek <số_giây>` (Ví dụ: `!seek 60`)"));
 
       await player.seek(seconds * 1000);
       return reply(new EmbedBuilder().setColor(0x6366f1).setDescription(`⏩ Đã tua đến mốc **${seconds}s**`));
@@ -432,6 +441,6 @@ client.on(Events.MessageCreate, async (msg) => {
 });
 
 /* =========================================================
-   7. ĐĂNG NHẬP CLIENT DISCORD
+   7. ĐĂNG NHẬP BOT
 ========================================================= */
-client.login(process.env.DISCORD_TOKEN);
+client.login(token);
