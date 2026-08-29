@@ -61,6 +61,21 @@ function parseSeek(input) {
   return null;
 }
 
+// Hàm dọn dẹp link YouTube (xóa tham số si=..., list=... gây lỗi tìm kiếm)
+function cleanQuery(input) {
+  if (!input) return input;
+  if (input.includes("youtube.com") || input.includes("youtu.be")) {
+    try {
+      const url = new URL(input);
+      url.searchParams.delete("si");
+      return url.toString();
+    } catch {
+      return input.split("?si=")[0];
+    }
+  }
+  return input;
+}
+
 /* =========================================================
    3. KHỞI TẠO DISCORD CLIENT & PLAYER MANAGER
 ========================================================= */
@@ -77,8 +92,19 @@ const client = new Client({
 const manager = new PlayerManager({
   plugins: [
     new YouTubePlugin({ 
-      highWaterMark: 1 << 26, // Tăng buffer lên 64MB giúp âm thanh mượt hơn
-      quality: "highestaudio" 
+      highWaterMark: 1 << 26, 
+      quality: "highestaudio",
+      // Thêm các cấu hình bên dưới để bypass YouTube blocking trên VPS/Render
+      ytdlOptions: {
+        filter: "audioonly",
+        highWaterMark: 1 << 26,
+        requestOptions: {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+        },
+      },
     }),
     new SpotifyPlugin(),
     new InfinityPlugin(),
@@ -392,18 +418,17 @@ client.on(Events.MessageCreate, async (msg) => {
   const voiceChannel = member?.voice?.channel;
 
   async function getPlayer() {
-    // Tối ưu cấu hình Player để xử lý luồng mượt mà, loại bỏ rè tiếng do quá tải CPU
     const p = await manager.create(msg.guildId, {
-      lowPerformance: true, // Bật chế độ hiệu năng thấp để giảm tải CPU
+      lowPerformance: true,
       preload: { enabled: true, autoDisableInLowPerformance: false },
-      crossfade: { enabled: false }, // Tắt crossfade để tránh xung đột luồng audio
-      smartTransition: { enabled: false }, // Tắt chuyển bài thông minh giảm lag
+      crossfade: { enabled: false },
+      smartTransition: { enabled: false },
       antiStuck: {
         enabled: true,
         maxRetries: 3,
         retryDelayMs: 1000,
       },
-      loudnessNormalization: { enabled: false }, // Tắt chuẩn hóa âm lượng (nguyên nhân chính gây rè)
+      loudnessNormalization: { enabled: false },
     });
     p.textChannelId = msg.channelId;
     return p;
@@ -417,10 +442,13 @@ client.on(Events.MessageCreate, async (msg) => {
       if (!voiceChannel) return reply(errEmbed("You need to be in a voice channel!"));
       if (!query) return reply(errEmbed("Provide a song name or URL."));
 
+      // Tự động làm sạch link YouTube trước khi đưa vào trình phát
+      const cleanedQuery = cleanQuery(query);
+
       const player = await getPlayer();
       if (!player.connection) await player.connect(voiceChannel);
 
-      const success = await player.play(query, msg.author.id);
+      const success = await player.play(cleanedQuery, msg.author.id);
       if (!success) return reply(errEmbed("Could not find or play that track."));
 
       if (player.isPlaying && player.currentTrack?.requestedBy !== msg.author.id) {
@@ -687,8 +715,8 @@ client.on(Events.MessageCreate, async (msg) => {
           {
             name: "⏭️  Bỏ Qua & Dừng (Có Tính Năng Vote)",
             value:
-              "`!skip` (`!s`) • Bỏ qua bài hát (Requestor skip ngay, người khác cần vote)\n" +
-              "`!stop` • Dừng nhạc & xóa hàng đợi (Mod/Requestor dừng ngay)\n" +
+              "`!skip` (`!s`) • Bỏ qua bài hát\n" +
+              "`!stop` • Dừng nhạc & xóa hàng đợi\n" +
               "`!voteskip` (`!vs`) • Mở cuộc biểu quyết skip bài hát\n" +
               "`!votestop` (`!vst`) • Mở cuộc biểu quyết dừng nhạc",
             inline: false,
@@ -697,19 +725,19 @@ client.on(Events.MessageCreate, async (msg) => {
             name: "🎛️  Tùy Chỉnh & Bộ Lọc Âm Thanh",
             value:
               "`!volume <0-200>` (`!vol`) • Điều chỉnh âm lượng bot\n" +
-              "`!filter <tên|clear>` (`!fx`) • Bật bộ lọc EQ (`bassboost`, `nightcore`, `lofi`...)\n" +
-              "`!seek <thời gian>` • Nhảy đến thời gian chỉ định (`!seek 1:30` hoặc `!seek 90`)",
+              "`!filter <tên|clear>` (`!fx`) • Bật bộ lọc EQ\n" +
+              "`!seek <thời gian>` • Nhảy đến thời gian chỉ định",
             inline: false,
           },
           {
             name: "📋  Quản Lý Hàng Đợi (Queue)",
             value:
               "`!queue` (`!q`) • Xem danh sách hàng đợi hiện tại\n" +
-              "`!nowplaying` (`!np`) • Xem chi tiết bài hát đang phát + thanh tiến trình\n" +
-              "`!loop <off|track|queue>` (`!l`) • Lặp lại bài hát hoặc toàn bộ hàng đợi\n" +
-              "`!shuffle` • Trộn bài ngẫu nhiên trong hàng đợi\n" +
-              "`!previous` (`!prev`) • Phát lại bài hát trước đó\n" +
-              "`!remove <STT>` (`!rm`) • Xóa 1 bài khỏi hàng đợi theo số thứ tự",
+              "`!nowplaying` (`!np`) • Xem chi tiết bài hát đang phát\n" +
+              "`!loop <off|track|queue>` (`!l`) • Lặp lại bài hát/hàng đợi\n" +
+              "`!shuffle` • Trộn bài ngẫu nhiên\n" +
+              "`!previous` (`!prev`) • Phát lại bài trước đó\n" +
+              "`!remove <STT>` (`!rm`) • Xóa bài khỏi hàng đợi",
             inline: false,
           }
         )
