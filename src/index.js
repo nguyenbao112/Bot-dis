@@ -4,9 +4,6 @@ import {
   Client,
   GatewayIntentBits,
   EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   PermissionFlagsBits,
   Events,
 } from "discord.js";
@@ -15,7 +12,7 @@ import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
 
 /* =========================================================
-   1. KHỞI TẠO WEB SERVER ĐỂ TRÁNH LỖI CRASH TRÊN RENDER
+   1. KHỞI TẠO WEB SERVER TRÁNH CRASH TRÊN RENDER
 ========================================================= */
 const PORT = process.env.PORT || 10000;
 http
@@ -61,13 +58,14 @@ function parseSeek(input) {
   return null;
 }
 
-// Hàm dọn dẹp link YouTube (xóa tham số si=..., list=... gây lỗi tìm kiếm)
+// Hàm dọn dẹp link YouTube khỏi các tham số thừa làm lỗi plugin
 function cleanQuery(input) {
   if (!input) return input;
   if (input.includes("youtube.com") || input.includes("youtu.be")) {
     try {
       const url = new URL(input);
       url.searchParams.delete("si");
+      url.searchParams.delete("pp");
       return url.toString();
     } catch {
       return input.split("?si=")[0];
@@ -91,17 +89,20 @@ const client = new Client({
 
 const manager = new PlayerManager({
   plugins: [
-    new YouTubePlugin({ 
-      highWaterMark: 1 << 26, 
+    new YouTubePlugin({
+      highWaterMark: 1 << 26,
       quality: "highestaudio",
-      // Thêm các cấu hình bên dưới để bypass YouTube blocking trên VPS/Render
+      // Cấu hình mã hóa đường truyền tránh YouTube phát hiện bot
       ytdlOptions: {
         filter: "audioonly",
+        quality: "highestaudio",
         highWaterMark: 1 << 26,
+        dlChunkSize: 0,
         requestOptions: {
           headers: {
             "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
           },
         },
       },
@@ -113,127 +114,6 @@ const manager = new PlayerManager({
   extractorTimeout: 30000,
   enableSearchCache: true,
 });
-
-const voteState = new Map();
-
-function countListeners(guild, player) {
-  try {
-    const botMember = guild.members.me;
-    const vc = botMember?.voice?.channel;
-    if (!vc) return 1;
-    return vc.members.filter((m) => !m.user.bot).size;
-  } catch {
-    return 1;
-  }
-}
-
-function votesRequired(listenerCount) {
-  return Math.max(1, Math.ceil(listenerCount * 0.5));
-}
-
-function buildVoteEmbed(type, current, required, track) {
-  const action = type === "skip" ? "⏭ Skip" : "⏹ Stop";
-  const color = type === "skip" ? 0xf59e0b : 0xef4444;
-  return new EmbedBuilder()
-    .setColor(color)
-    .setTitle(`${action} Vote`)
-    .setDescription(
-      `**${current}/${required}** votes needed to ${type}.\n` +
-        `Track: **${track?.title ?? "Unknown"}**`
-    )
-    .setFooter({ text: "Vote expires in 60 seconds" });
-}
-
-function buildVoteRow(guildId) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`vote_yes_${guildId}`)
-      .setLabel("✅ Vote Yes")
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId(`vote_cancel_${guildId}`)
-      .setLabel("❌ Cancel Vote")
-      .setStyle(ButtonStyle.Danger)
-  );
-}
-
-async function cleanupVote(guildId, channel, msgId) {
-  voteState.delete(guildId);
-  try {
-    const msg = await channel.messages.fetch(msgId);
-    await msg.delete().catch(() => {});
-  } catch {}
-}
-
-async function startVote(type, guild, channel, player, requesterId) {
-  if (voteState.has(guild.id)) {
-    await channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x6b7280)
-          .setDescription("⚠️ A vote is already in progress!"),
-      ],
-    });
-    return;
-  }
-
-  const track = player.currentTrack;
-  if (!track) {
-    await channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x6b7280)
-          .setDescription("❌ Nothing is playing right now."),
-      ],
-    });
-    return;
-  }
-
-  const listeners = countListeners(guild, player);
-  const required = votesRequired(listeners);
-  const voters = new Set([requesterId]);
-
-  if (voters.size >= required) {
-    if (type === "skip") player.skip();
-    else player.stop();
-    await channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x22c55e)
-          .setDescription(
-            type === "skip"
-              ? "⏭ Skipped! (only listener)"
-              : "⏹ Stopped! (only listener)"
-          ),
-      ],
-    });
-    return;
-  }
-
-  const embed = buildVoteEmbed(type, voters.size, required, track);
-  const row = buildVoteRow(guild.id);
-  const msg = await channel.send({ embeds: [embed], components: [row] });
-
-  voteState.set(guild.id, {
-    type,
-    voters,
-    required,
-    msgId: msg.id,
-    channelId: channel.id,
-    requesterId,
-    trackId: track.id,
-    timeout: setTimeout(async () => {
-      await cleanupVote(guild.id, channel, msg.id);
-      await channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0x6b7280)
-            .setDescription("⌛ Vote expired — not enough votes."),
-        ],
-      });
-    }, 60_000),
-  });
-}
 
 /* =========================================================
    4. SỰ KIỆN MUSIC PLAYER
@@ -295,112 +175,7 @@ manager.on("playerError", async (player, error, track) => {
 });
 
 /* =========================================================
-   5. SỰ KIỆN NÚT BẤM (BUTTON INTERACTION)
-========================================================= */
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  const { customId, guild, user, channel } = interaction;
-  const guildId = guild?.id;
-  if (!guildId) return;
-
-  const player = manager.get(guildId);
-  const state = voteState.get(guildId);
-
-  if (customId === `vote_yes_${guildId}`) {
-    if (!state) {
-      return interaction.reply({ content: "No active vote.", ephemeral: true });
-    }
-
-    if (state.voters.has(user.id)) {
-      return interaction.reply({ content: "You already voted!", ephemeral: true });
-    }
-
-    const member = await guild.members.fetch(user.id);
-    const botVc = guild.members.me?.voice?.channel;
-    if (!botVc || member.voice.channelId !== botVc.id) {
-      return interaction.reply({
-        content: "You must be in the voice channel to vote!",
-        ephemeral: true,
-      });
-    }
-
-    state.voters.add(user.id);
-
-    const listeners = countListeners(guild, player);
-    const required = votesRequired(listeners);
-    state.required = required;
-
-    if (state.voters.size >= required) {
-      clearTimeout(state.timeout);
-      const type = state.type;
-      await cleanupVote(guildId, channel, state.msgId);
-
-      if (player) {
-        if (type === "skip") player.skip();
-        else player.stop();
-      }
-
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0x22c55e)
-            .setDescription(
-              type === "skip"
-                ? "⏭ Vote passed! Skipping..."
-                : "⏹ Vote passed! Stopping..."
-            ),
-        ],
-      });
-    }
-
-    const updatedEmbed = buildVoteEmbed(
-      state.type,
-      state.voters.size,
-      required,
-      player?.currentTrack
-    );
-    try {
-      const msg = await channel.messages.fetch(state.msgId);
-      await msg.edit({ embeds: [updatedEmbed], components: [buildVoteRow(guildId)] });
-    } catch {}
-
-    return interaction.reply({
-      content: `✅ Vote counted! (${state.voters.size}/${required})`,
-      ephemeral: true,
-    });
-  }
-
-  if (customId === `vote_cancel_${guildId}`) {
-    if (!state) {
-      return interaction.reply({ content: "No active vote.", ephemeral: true });
-    }
-
-    const member = await guild.members.fetch(user.id);
-    const canCancel =
-      user.id === state.requesterId ||
-      member.permissions.has(PermissionFlagsBits.ManageChannels);
-
-    if (!canCancel) {
-      return interaction.reply({
-        content: "Only the vote starter or a moderator can cancel.",
-        ephemeral: true,
-      });
-    }
-
-    clearTimeout(state.timeout);
-    await cleanupVote(guildId, channel, state.msgId);
-
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder().setColor(0x6b7280).setDescription("🗑 Vote cancelled."),
-      ],
-    });
-  }
-});
-
-/* =========================================================
-   6. SỰ KIỆN XỬ LÝ LỆNH (MESSAGE COMMANDS)
+   5. SỰ KIỆN XỬ LÝ LỆNH (MESSAGE COMMANDS)
 ========================================================= */
 client.on(Events.ClientReady, () => {
   console.log(`🤖 Bot online với tên: ${client.user.tag}`);
@@ -413,7 +188,6 @@ client.on(Events.MessageCreate, async (msg) => {
   const args = msg.content.slice(1).trim().split(/\s+/);
   const command = args.shift().toLowerCase();
   const query = args.join(" ");
-  const guild = msg.guild;
   const member = msg.member;
   const voiceChannel = member?.voice?.channel;
 
@@ -434,6 +208,15 @@ client.on(Events.MessageCreate, async (msg) => {
     return p;
   }
 
+  // Hàm kiểm tra quyền tác giả bài hát hoặc Admin
+  function isOwnerOrMod(player) {
+    const track = player?.currentTrack;
+    if (!track) return false;
+    const isRequester = track.requestedBy === msg.author.id;
+    const isMod = member.permissions.has(PermissionFlagsBits.ManageChannels);
+    return isRequester || isMod;
+  }
+
   const reply = (embed) => msg.reply({ embeds: [embed] });
 
   switch (command) {
@@ -442,14 +225,12 @@ client.on(Events.MessageCreate, async (msg) => {
       if (!voiceChannel) return reply(errEmbed("You need to be in a voice channel!"));
       if (!query) return reply(errEmbed("Provide a song name or URL."));
 
-      // Tự động làm sạch link YouTube trước khi đưa vào trình phát
       const cleanedQuery = cleanQuery(query);
-
       const player = await getPlayer();
       if (!player.connection) await player.connect(voiceChannel);
 
       const success = await player.play(cleanedQuery, msg.author.id);
-      if (!success) return reply(errEmbed("Could not find or play that track."));
+      if (!success) return reply(errEmbed("Could not find or play that track. Try searching by song name instead of link."));
 
       if (player.isPlaying && player.currentTrack?.requestedBy !== msg.author.id) {
         return reply(
@@ -464,6 +245,11 @@ client.on(Events.MessageCreate, async (msg) => {
     case "pause": {
       const player = manager.get(msg.guildId);
       if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
+
+      if (!isOwnerOrMod(player)) {
+        return reply(errEmbed("Chỉ người yêu cầu bài hát này mới có quyền tạm dừng!"));
+      }
+
       player.pause();
       return reply(new EmbedBuilder().setColor(0xf59e0b).setDescription("⏸ Paused."));
     }
@@ -472,6 +258,11 @@ client.on(Events.MessageCreate, async (msg) => {
     case "r": {
       const player = manager.get(msg.guildId);
       if (!player?.isPaused) return reply(errEmbed("Nothing is paused!"));
+
+      if (!isOwnerOrMod(player)) {
+        return reply(errEmbed("Chỉ người yêu cầu bài hát này mới có quyền tiếp tục!"));
+      }
+
       player.resume();
       return reply(new EmbedBuilder().setColor(0x22c55e).setDescription("▶️ Resumed."));
     }
@@ -481,56 +272,30 @@ client.on(Events.MessageCreate, async (msg) => {
       const player = manager.get(msg.guildId);
       if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
 
-      const track = player.currentTrack;
-      const isRequester = track?.requestedBy === msg.author.id;
-
-      if (isRequester) {
-        player.skip();
-        return reply(
-          new EmbedBuilder()
-            .setColor(0x22c55e)
-            .setDescription("⏭ Skipped! (you requested this track)")
-        );
+      if (!isOwnerOrMod(player)) {
+        return reply(errEmbed("Chỉ người yêu cầu bài hát này mới có quyền Skip!"));
       }
 
-      await startVote("skip", guild, msg.channel, player, msg.author.id);
-      break;
+      player.skip();
+      return reply(
+        new EmbedBuilder()
+          .setColor(0x22c55e)
+          .setDescription("⏭ Skipped track!")
+      );
     }
 
     case "stop": {
       const player = manager.get(msg.guildId);
       if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
 
-      const track = player.currentTrack;
-      const isRequester = track?.requestedBy === msg.author.id;
-      const isMod = member.permissions.has(PermissionFlagsBits.ManageChannels);
-
-      if (isRequester || isMod) {
-        player.stop();
-        voteState.delete(msg.guildId);
-        return reply(
-          new EmbedBuilder().setColor(0xef4444).setDescription("⏹ Stopped and queue cleared.")
-        );
+      if (!isOwnerOrMod(player)) {
+        return reply(errEmbed("Chỉ người yêu cầu bài hát này mới có quyền Stop!"));
       }
 
-      await startVote("stop", guild, msg.channel, player, msg.author.id);
-      break;
-    }
-
-    case "voteskip":
-    case "vs": {
-      const player = manager.get(msg.guildId);
-      if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
-      await startVote("skip", guild, msg.channel, player, msg.author.id);
-      break;
-    }
-
-    case "votestop":
-    case "vst": {
-      const player = manager.get(msg.guildId);
-      if (!player?.isPlaying) return reply(errEmbed("Nothing is playing!"));
-      await startVote("stop", guild, msg.channel, player, msg.author.id);
-      break;
+      player.stop();
+      return reply(
+        new EmbedBuilder().setColor(0xef4444).setDescription("⏹ Stopped and queue cleared.")
+      );
     }
 
     case "volume":
@@ -671,62 +436,24 @@ client.on(Events.MessageCreate, async (msg) => {
       );
     }
 
-    case "filter":
-    case "fx": {
-      const player = manager.get(msg.guildId);
-      if (!player) return reply(errEmbed("No player active."));
-      const validFilters = [
-        "bassboost", "trebleboost", "nightcore", "lofi", "vaporwave",
-        "echo", "reverb", "chorus", "karaoke", "normalize", "compressor", "limiter",
-      ];
-      if (query === "clear" || query === "reset") {
-        await player.filter.clearAll();
-        return reply(
-          new EmbedBuilder().setColor(0x22c55e).setDescription("✅ All filters cleared.")
-        );
-      }
-      if (!validFilters.includes(query))
-        return reply(errEmbed(`Valid filters: \`${validFilters.join(", ")}\`, or \`clear\``));
-      await player.filter.applyFilter(query);
-      return reply(
-        new EmbedBuilder().setColor(0x8b5cf6).setDescription(`✨ Filter **${query}** applied.`)
-      );
-    }
-
     case "help":
     case "h": {
       const embed = new EmbedBuilder()
         .setColor(0x6366f1)
         .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
         .setDescription(
-          "Chào mừng bạn đến với **Crystal Audio Bot**! Dưới đây là danh sách toàn bộ lệnh khả dụng. Tiền tố lệnh mặc định là `!`\n\n" +
-          "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          "Chào mừng bạn đến với **Crystal Audio Bot**! Dưới đây là danh sách toàn bộ lệnh khả dụng:\n\n" +
+          "🔒 *Lưu ý: Các lệnh Pause, Resume, Skip, Stop chỉ người bật bài hát mới có quyền dùng.*"
         )
-        .setThumbnail(client.user?.displayAvatarURL() || null)
         .addFields(
           {
-            name: "▶️  Phát & Tạm Dừng Nhạc",
+            name: "▶️  Điều Khiển Nhạc",
             value:
               "`!play <tên/link>` (`!p`) • Phát nhạc hoặc thêm vào hàng đợi\n" +
-              "`!pause` • Tạm dừng bài hát đang phát\n" +
-              "`!resume` (`!r`) • Tiếp tục phát bài hát",
-            inline: false,
-          },
-          {
-            name: "⏭️  Bỏ Qua & Dừng (Có Tính Năng Vote)",
-            value:
-              "`!skip` (`!s`) • Bỏ qua bài hát\n" +
-              "`!stop` • Dừng nhạc & xóa hàng đợi\n" +
-              "`!voteskip` (`!vs`) • Mở cuộc biểu quyết skip bài hát\n" +
-              "`!votestop` (`!vst`) • Mở cuộc biểu quyết dừng nhạc",
-            inline: false,
-          },
-          {
-            name: "🎛️  Tùy Chỉnh & Bộ Lọc Âm Thanh",
-            value:
-              "`!volume <0-200>` (`!vol`) • Điều chỉnh âm lượng bot\n" +
-              "`!filter <tên|clear>` (`!fx`) • Bật bộ lọc EQ\n" +
-              "`!seek <thời gian>` • Nhảy đến thời gian chỉ định",
+              "`!pause` • Tạm dừng (Chỉ người phát bài mới dùng được)\n" +
+              "`!resume` (`!r`) • Tiếp tục phát (Chỉ người phát bài mới dùng được)\n" +
+              "`!skip` (`!s`) • Bỏ qua bài hát (Chỉ người phát bài mới dùng được)\n" +
+              "`!stop` • Dừng phát nhạc (Chỉ người phát bài mới dùng được)",
             inline: false,
           },
           {
@@ -741,11 +468,7 @@ client.on(Events.MessageCreate, async (msg) => {
             inline: false,
           }
         )
-        .setFooter({
-          text: "💡 Mẹo: Ngưỡng biểu quyết (Vote) mặc định là 50% số người nghe trong Voice Channel.",
-          iconURL: msg.author.displayAvatarURL(),
-        })
-        .setTimestamp();
+        .setFooter({ text: "Crystal Audio • Private Control System" });
 
       return reply(embed);
     }
@@ -753,6 +476,6 @@ client.on(Events.MessageCreate, async (msg) => {
 });
 
 /* =========================================================
-   7. ĐĂNG NHẬP BOT
+   6. ĐĂNG NHẬP BOT
 ========================================================= */
 client.login(process.env.DISCORD_TOKEN);
