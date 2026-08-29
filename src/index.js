@@ -47,7 +47,26 @@ function parseNetscapeCookie(cookieRaw) {
   return cookies.join("; ");
 }
 
-const RAW_COOKIE = process.env.YT_COOKIE || "";
+// Chuỗi cookie dự phòng chính xác của bạn
+const BACKUP_COOKIE = `.youtube.com	TRUE	/	TRUE	1787988280	GPS	1
+.youtube.com	TRUE	/	TRUE	1822546590	PREF	f6=40000000&tz=Asia.Saigon
+.youtube.com	TRUE	/	TRUE	1819522589	__Secure-1PSIDTS	sidts-CjUBXMw41YejFAqpzVEi3r8vWyT-8I0ttNYiDpkEDtAM32OrbZa9uSBj99NBIa6KlEOtdVQcHBAA
+.youtube.com	TRUE	/	TRUE	1819522589	__Secure-3PSIDTS	sidts-CjUBXMw41YejFAqpzVEi3r8vWyT-8I0ttNYiDpkEDtAM32OrbZa9uSBj99NBIa6KlEOtdVQcHBAA
+.youtube.com	TRUE	/	FALSE	1822546589	HSID	AlzGNN5GLQ_s5EZaY
+.youtube.com	TRUE	/	TRUE	1822546589	SSID	AaH7WuLjIxpibBgiJ
+.youtube.com	TRUE	/	FALSE	1822546589	APISID	Y6lNr8DXLZWr1ffQ/AjuUTSTDb4KlXQM5Y
+.youtube.com	TRUE	/	TRUE	1822546589	SAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
+.youtube.com	TRUE	/	TRUE	1822546589	__Secure-1PAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
+.youtube.com	TRUE	/	TRUE	1822546589	__Secure-3PAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
+.youtube.com	TRUE	/	FALSE	1822546589	SID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPeaiAfccW8YV0g2QHXwkbdwACgYKAfwSARISFQHGX2MilDc0HmxxU10JBnB4aMZLuRoVAUF8yKoNfAwNijxtSK8T24yoN0810076
+.youtube.com	TRUE	/	TRUE	1822546589	__Secure-1PSID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPNA5MGdPr9Q7P4p1YS6ycZAACgYKAXQSARISFQHGX2MiPIgGlv_F4rVgOW7yqeJjbhoVAUF8yKovfghXmXc_BIbPN5mgaJNF0076
+.youtube.com	TRUE	/	TRUE	1822546589	__Secure-3PSID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPa1DxViXJFaQL_TkUU17m6QACgYKAa8SARISFQHGX2MiDTQbanLPNpOqd0S9IzkkyBoVAUF8yKoS9JGPILD374mqCBWXXJV30076
+.youtube.com	TRUE	/	TRUE	1822546589	LOGIN_INFO	AFmmF2swRgIhAKJtaS7QJYyEjGqDL5joJpMi2QsCWyUbK8FL9nGVUVyaAiEAkFpenOac1UVe_HiQ3n7Uajfsj6P02n-Mtiaxirrp5DQ:QUQ3MjNmejR4alpITXQ5ajZZN1hkTFJ4NDVicDhBZEp6cHhTTFRkc09ZRFl5TGxhOWZaa0pGbS1MQzdtaG9aVUxJM1JLU2U3TEVXbTlBbTlkSXVkUWUtdGZYeVdQaWt1YVBBOFJHUEdZaGx4MHdscWdKUy11MlkyallwTk5pTUl3YkVZMjZ6TGpYZEVIckpsRnY2Z2N6d1ZYU3VDeEZnZTZ3
+.youtube.com	TRUE	/	FALSE	1819522592	SIDCC	AKEyXzU01kp87k0-3TKE-i_h300LKlB-bZF-f8_K4hXvBXqto2B6dfRzQVzlDYDswlZ0bTTx
+.youtube.com	TRUE	/	TRUE	1819522592	__Secure-1PSIDCC	AKEyXzWw3Hoa4EM24wj6_s8iq-rwq0V5dQ69sn93oFxpj_MZ31fUrPBcM4RNK39DdI7LL3jYZQ
+.youtube.com	TRUE	/	TRUE	1819522592	__Secure-3PSIDCC	AKEyXzWQ5tfbJbjMn0Kf-0s0xhi--amIqm4umYo3Mef7pRQZX1Ii1_PAroJCLFgt4aDrFORvlA`;
+
+const RAW_COOKIE = process.env.YT_COOKIE || BACKUP_COOKIE;
 const FORMATTED_COOKIE = parseNetscapeCookie(RAW_COOKIE);
 
 /* =========================================================
@@ -74,29 +93,27 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-function parseSeek(input) {
-  if (!input) return null;
-  if (/^\d+$/.test(input)) return parseInt(input, 10) * 1000;
-  const parts = input.split(":").map((p) => parseInt(p, 10));
-  if (parts.some(isNaN)) return null;
-  if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000;
-  if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
-  return null;
-}
-
+// Xử lý triệt để link rút gọn youtu.be và xóa mọi tham số rác (?si=...)
 function cleanQuery(input) {
   if (!input) return input;
-  if (input.includes("youtube.com") || input.includes("youtu.be")) {
+  let clean = input.trim();
+  
+  if (clean.includes("youtu.be/")) {
+    const id = clean.split("youtu.be/")[1].split("?")[0].split("&")[0];
+    return `https://www.youtube.com/watch?v=${id}`;
+  }
+  
+  if (clean.includes("youtube.com") || clean.includes("youtu.be")) {
     try {
-      const url = new URL(input);
+      const url = new URL(clean);
       url.searchParams.delete("si");
       url.searchParams.delete("pp");
       return url.toString();
     } catch {
-      return input.split("?si=")[0];
+      return clean.split("?si=")[0];
     }
   }
-  return input;
+  return clean;
 }
 
 /* =========================================================
@@ -118,7 +135,6 @@ const manager = new PlayerManager({
       highWaterMark: 1 << 26,
       quality: "highestaudio",
       cookies: FORMATTED_COOKIE,
-      // Tắt SABR để khắc phục hoàn toàn lỗi "No suitable formats found"
       sabrOptions: {
         enabled: false,
       },
@@ -204,7 +220,7 @@ manager.on("playerError", async (player, error, track) => {
 });
 
 /* =========================================================
-   6. SỰ KIỆN XỬ LÝ LỆNH (MESSAGE COMMANDS)
+   6. SỰ KIỆN XỬ LÝ LỆNH DISCORD
 ========================================================= */
 client.on(Events.ClientReady, () => {
   console.log(`🤖 Bot online với tên: ${client.user.tag}`);
