@@ -10,9 +10,8 @@ import {
 import { PlayerManager } from "ziplayer";
 import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
-import { YTexec } from "@ziplayer/ytexecplug";
 
-// 1. Tạo HTTP Server duy trì kết nối cho Render Web Service
+// 1. Khởi tạo HTTP Server duy trì kết nối cho Render Web Service
 const PORT = process.env.PORT || 10000;
 http
   .createServer((req, res) => {
@@ -34,12 +33,13 @@ const client = new Client({
   ],
 });
 
-// 3. Khởi tạo PlayerManager với Fallback Plugin cho YouTube
+// 3. Khởi tạo PlayerManager với InfinityPlugin làm nguồn phát dự phòng chính
 const manager = new PlayerManager({
   plugins: [
     new InfinityPlugin(),
     new YouTubePlugin({
-      firstStream: new YTexec().getStream, // Dùng YTexec dự phòng khi stream gốc bị lỗi
+      highWaterMark: 1 << 24,
+      quality: "highestaudio",
     }),
     new SpotifyPlugin(),
   ],
@@ -112,7 +112,7 @@ client.on(Events.MessageCreate, async (msg) => {
   const member = msg.member;
   const voiceChannel = member?.voice?.channel;
 
-  // Hàm khởi tạo Player với cấu hình nâng cao
+  // Hàm khởi tạo Player với cấu hình chống lag và cân bằng âm lượng
   async function getOrCreatePlayer() {
     const p = await manager.create(msg.guildId, {
       lowPerformance: false,
