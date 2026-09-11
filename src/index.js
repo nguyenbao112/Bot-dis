@@ -3,13 +3,19 @@ import { PlayerManager } from "ziplayer";
 import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
 import express from "express";
 
-// 1. Keep-Alive Server
+// 1. Web Server Keep-Alive cho Render
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get("/", (req, res) => res.send("Bot đang chạy!"));
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
-// 2. Discord Client & PlayerManager
+app.get("/", (req, res) => {
+    res.send("Bot đang chạy 24/7!");
+});
+
+app.listen(PORT, () => {
+    console.log(`Web server đang chạy ở cổng ${PORT}`);
+});
+
+// 2. Cấu hình Discord Bot & ZiPlayer
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -21,8 +27,13 @@ const client = new Client({
 
 const manager = new PlayerManager({
     plugins: [new YouTubePlugin(), new SpotifyPlugin()],
-    autoCleanup: true,[span_0](start_span)[span_0](end_span)
-    enableSearchCache: true,[span_1](start_span)[span_1](end_span)
+    autoCleanup: true,
+    enableSearchCache: true,
+    extractorTimeout: 30000,
+});
+
+client.on("ready", () => {
+    console.log(`Bot kết nối thành công: ${client.user.tag}`);
 });
 
 // 3. Xử lý Lệnh
@@ -34,25 +45,24 @@ client.on("messageCreate", async (msg) => {
     const query = args.slice(1).join(" ");
 
     const player = await manager.create(msg.guildId, {
-        lowPerformance: true,[span_2](start_span)[span_2](end_span)
-        antiStuck: { enabled: true, maxRetries: 2, retryDelayMs: 1000 }
+        lowPerformance: true,
+        antiStuck: {
+            enabled: true,
+            maxRetries: 2,
+            retryDelayMs: 1000,
+        }
     });
 
     const voiceChannel = msg.member?.voice.channel;
 
-    // Hàm kiểm tra quyền: Trả về true nếu là người yêu cầu bài hát HOẶC là Admin/Mod
+    // Kiểm tra quyền (chỉ người gọi bài hát hoặc Admin/Mod)
     const hasPermission = () => {
         const currentTrack = player.currentTrack;
         const isAdmin = msg.member.permissions.has(PermissionsBitField.Flags.ManageChannels) || 
                         msg.member.permissions.has(PermissionsBitField.Flags.Administrator);
         
-        // Nếu không có bài nào đang phát, cho phép thực thi
-        if (!currentTrack) return true; 
-
-        // Kiểm tra xem ID người dùng có khớp với requestedBy của bài hát hay không
-        const isRequester = currentTrack.requestedBy === msg.author.id;
-
-        return isRequester || isAdmin;
+        if (!currentTrack) return true;
+        return currentTrack.requestedBy === msg.author.id || isAdmin;
     };
 
     switch (command) {
@@ -64,50 +74,42 @@ client.on("messageCreate", async (msg) => {
             if (!player.connection) await player.connect(voiceChannel);
 
             try {
-                // Lưu ID của tác giả lệnh vào requestedBy
-                await player.play(query, msg.author.id);[span_3](start_span)[span_3](end_span)
-                msg.reply(`🔎 Đã thêm: **${query}**`);
+                await player.play(query, msg.author.id);
+                msg.reply(`🔎 Đã thêm vào hàng đợi: **${query}**`);
             } catch (err) {
+                console.error(err);
                 msg.reply("❌ Không thể phát bài hát này!");
             }
             break;
 
         case "pause":
-            if (!hasPermission()) {
-                return msg.reply("❌ Chỉ người thêm bài hát này hoặc Admin mới có quyền tạm dừng!");
-            }
-            player.pause();[span_4](start_span)[span_4](end_span)
+            if (!hasPermission()) return msg.reply("❌ Chỉ người thêm bài hát hoặc Admin mới có quyền tạm dừng!");
+            player.pause();
             msg.reply("⏸️ Đã tạm dừng.");
             break;
 
         case "resume":
-            if (!hasPermission()) {
-                return msg.reply("❌ Chỉ người thêm bài hát này hoặc Admin mới có quyền phát tiếp!");
-            }
-            player.resume();[span_5](start_span)[span_5](end_span)
+            if (!hasPermission()) return msg.reply("❌ Chỉ người thêm bài hát hoặc Admin mới có quyền phát tiếp!");
+            player.resume();
             msg.reply("▶️ Tiếp tục phát.");
             break;
 
         case "skip":
         case "s":
-            if (!hasPermission()) {
-                return msg.reply("❌ Chỉ người thêm bài hát này hoặc Admin mới có quyền bỏ qua!");
-            }
-            player.skip();[span_6](start_span)[span_6](end_span)
+            if (!hasPermission()) return msg.reply("❌ Chỉ người thêm bài hát hoặc Admin mới có quyền bỏ qua!");
+            player.skip();
             msg.reply("⏭️ Đã chuyển bài.");
             break;
 
         case "stop":
-            if (!hasPermission()) {
-                return msg.reply("❌ Chỉ người thêm bài hát này hoặc Admin mới có quyền dừng nhạc!");
-            }
-            player.stop();[span_7](start_span)[span_7](end_span)
-            msg.reply("⏹️ Đã dừng nhạc.");
+            if (!hasPermission()) return msg.reply("❌ Chỉ người thêm bài hát hoặc Admin mới có quyền dừng nhạc!");
+            player.stop();
+            msg.reply("⏹️ Đã dừng nhạc và xóa hàng đợi.");
             break;
 
         case "queue":
         case "q":
-            const tracks = player.upcomingTracks.slice(0, 10);[span_8](start_span)[span_8](end_span)
+            const tracks = player.upcomingTracks.slice(0, 10);
             const embed = new EmbedBuilder()
                 .setTitle("🎶 Hàng Đợi")
                 .setDescription(tracks.map((t, i) => `${i + 1}. **${t.title}**`).join("\n") || "Hàng đợi trống.");
