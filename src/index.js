@@ -1,9 +1,10 @@
 require("dotenv").config();
 const express = require("express");
 const { PlayerManager } = require("ziplayer");
-const { Client, GatewayIntentBits } = require("discord.js");
-// Note: do NOT import SoundCloudPlugin statically to avoid @zibot/scdl init when no key is present
-const { YouTubePlugin, SpotifyPlugin } = require("@ziplayer/plugin");
+const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
+// Avoid importing entire @ziplayer/plugin bundle to prevent @zibot/scdl init
+const YouTubePlugin = require("@ziplayer/plugin-youtube");
+const SpotifyPlugin = require("@ziplayer/plugin-spotify");
 
 // 1. Web Server Keep-Alive giúp Render luôn online
 const app = express();
@@ -30,8 +31,6 @@ const client = new Client({
 
 // === CHỈ SỬA ĐÚNG ĐOẠN NÀY ===
 // SoundCloudKeyManager: probe SoundCloud for client_id and auto-refresh periodically.
-// It will not force-recreate the player manager automatically (to avoid disrupting playback),
-// but it will keep the in-memory client id up-to-date and log when a new id is found.
 class SoundCloudKeyManager {
 	constructor({ refreshIntervalMs = 6 * 60 * 60 * 1000, userAgent = null } = {}) {
 		this.clientId = null;
@@ -51,7 +50,6 @@ class SoundCloudKeyManager {
 
 	async _fetchText(url) {
 		if (typeof globalThis.fetch !== "function") {
-			// fetch not available in this runtime
 			throw new Error("fetch is not available in this Node runtime");
 		}
 		const resp = await fetch(url, this.fetchOptions);
@@ -60,17 +58,14 @@ class SoundCloudKeyManager {
 	}
 
 	async probeForClientId() {
-		// Try homepage first
 		const homepage = await this._fetchText("https://soundcloud.com/");
 
-		// Common patterns
 		const reClient = /client_id["']?\s*[:=]\s*["']([a-zA-Z0-9_\-]{20,})["']/g;
 		let m;
 		while ((m = reClient.exec(homepage)) !== null) {
 			if (m[1]) return m[1];
 		}
 
-		// Find scripts to probe
 		const scriptRe = /<script[^>]+src=["']([^"']+)["']/g;
 		const scriptUrls = [];
 		let s;
@@ -87,11 +82,10 @@ class SoundCloudKeyManager {
 				const m2 = /client_id["']?\s*[:=]\s*["']([a-zA-Z0-9_\-]{20,})["']/.exec(js);
 				if (m2 && m2[1]) return m2[1];
 			} catch (err) {
-				// ignore script fetch errors
+				// ignore
 			}
 		}
 
-		// Not found
 		return null;
 	}
 
@@ -118,7 +112,6 @@ class SoundCloudKeyManager {
 	startBackground() {
 		if (this.running) return;
 		this.running = true;
-		// initial immediate probe (non-blocking)
 		this.refreshOnce();
 		this.timer = setInterval(() => {
 			this.refreshOnce();
@@ -135,38 +128,94 @@ class SoundCloudKeyManager {
 	}
 }
 
-// priority: environment variable > discovered key
 const envSoundcloudClientId = process.env.SOUNDCLOUD_CLIENT_ID || process.env.SOUNDCLOUD_CLIENTID || null;
 const scKeyManager = new SoundCloudKeyManager({ refreshIntervalMs: 6 * 60 * 60 * 1000 });
 if (!envSoundcloudClientId) {
-	// start background discovery if env not provided
 	scKeyManager.startBackground();
 } else {
-	// still start background to auto-refresh if env provided
 	scKeyManager.clientId = envSoundcloudClientId;
 	scKeyManager.startBackground();
 }
 
-// Use the env value if present, otherwise fallback to whatever discovery returned so far
 let initialSoundcloudClientId = envSoundcloudClientId || scKeyManager.getClientId() || null;
 
 let soundcloudPlugin = null;
-if (initialSoundcloudClientId) {
-	// Dynamic import to avoid module top-level init when no key
+
+async function tryHotSwapSoundCloudPlugin(clientId) {
+	if (!clientId) return false;
+	if (soundcloudPlugin) return true; // already added
 	try {
-		const pluginModule = require("@ziplayer/plugin");
-		if (pluginModule && pluginModule.SoundCloudPlugin) {
-			soundcloudPlugin = new pluginModule.SoundCloudPlugin({
-				client_id: initialSoundcloudClientId,
-				clientId: initialSoundcloudClientId,
-			});
-		} else {
-			console.warn("[SoundCloud] SoundCloudPlugin not found in @ziplayer/plugin");
+		// dynamic require of plugin bundle; some versions export SoundCloudPlugin
+		let pluginModule;
+		try {
+			pluginModule = require("@ziplayer/plugin");
+		} catch (e) {
+			// fallback: some repos expose plugin in a scoped package; try to require specific package
+			try {
+				pluginModule = require("@ziplayer/plugin-soundcloud");
+			} catch (e2) {
+				console.warn("[HotSwap] Could not require SoundCloud plugin package:", e2 && e2.message ? e2.message : e2);
+			}
+		}
+		const SCP = pluginModule ? (pluginModule.SoundCloudPlugin || pluginModule.default?.SoundCloudPlugin || pluginModule) : null;
+		if (!SCP) {
+			console.warn('[HotSwap] SoundCloudPlugin not found in required module');
+			return false;
+		}
+		// instantiate
+		soundcloudPlugin = new SCP({ client_id: clientId, clientId: clientId });
+
+		// Try to attach to existing player manager in safe ways
+		if (player && typeof player.registerPlugin === 'function') {
+			try {
+				player.registerPlugin(soundcloudPlugin);
+				console.log('[HotSwap] Attached SoundCloud plugin via player.registerPlugin');
+				return true;
+			} catch (err) {
+				console.warn('[HotSwap] registerPlugin failed:', err && err.message ? err.message : err);
+			}
+		}
+
+		if (player && typeof player.use === 'function') {
+			try {
+				player.use(soundcloudPlugin);
+				console.log('[HotSwap] Attached SoundCloud plugin via player.use');
+				return true;
+			} catch (err) {
+				console.warn('[HotSwap] player.use failed:', err && err.message ? err.message : err);
+			}
+		}
+
+		// Last resort: push into plugins array if exists (may not be respected)
+		if (player && Array.isArray(player.plugins)) {
+			player.plugins.push(soundcloudPlugin);
+			console.log('[HotSwap] Pushed SoundCloud plugin into player.plugins array (may require restart)');
+			return true;
+		}
+
+		console.warn('[HotSwap] Could not attach SoundCloud plugin at runtime; restart required');
+		return false;
+	} catch (err) {
+		console.warn('[HotSwap] Error while hot-swapping SoundCloud plugin:', err && err.stack ? err.stack : err);
+		return false;
+	}
+}
+
+// Periodically attempt hot-swap if discovery finds a client id
+const hotSwapWatcher = setInterval(async () => {
+	try {
+		const cid = scKeyManager.getClientId();
+		if (cid && !soundcloudPlugin) {
+			await tryHotSwapSoundCloudPlugin(cid);
 		}
 	} catch (err) {
-		console.warn("[SoundCloud] dynamic require failed (delayed init):", err && err.message ? err.message : err);
-		// Do not crash; plugin will remain null and discovery will continue in background
+		// ignore
 	}
+}, 5000);
+
+if (initialSoundcloudClientId) {
+	// try immediate attach
+	tryHotSwapSoundCloudPlugin(initialSoundcloudClientId);
 } else {
 	console.log("[SoundCloud] No client_id available at startup — SoundCloud plugin disabled. Discovery running in background.");
 }
@@ -225,6 +274,23 @@ client.on("messageCreate", async (message) => {
 
 	const args = message.content.slice(prefix.length).trim().split(/ +/g);
 	const command = args.shift().toLowerCase();
+
+	// HELP - Tiếng Việt
+	if (command === "help" || command === "h") {
+		const helpEmbed = new EmbedBuilder()
+			.setColor("#0099ff")
+			.setTitle("🎵 HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
+			.setDescription("Tiền tố lệnh: `!`\nNguồn hỗ trợ: YouTube, Spotify, SoundCloud (nếu có)")
+			.addFields(
+				{ name: "▶️ Phát Nhạc", value: "`!play <tên hoặc URL>` hoặc `!p` — Phát nhạc từ YouTube/Spotify/SoundCloud (nếu có)." },
+				{ name: "🔎 SoundCloud", value: "`!scplay <tên hoặc URL>` hoặc `!sc` — Tìm và phát nhạc từ SoundCloud." },
+				{ name: "⏸️ Điều Khiển", value: "`!pause`, `!resume`, `!skip` (chỉ người yêu cầu), `!stop`" },
+				{ name: "🔊 Âm Lượng", value: "`!volume <0-100>` hoặc `!vol` — Điều chỉnh âm lượng bot." },
+				{ name: "📋 Hàng Đợi", value: "`!queue` hoặc `!q` — Xem 10 bài tiếp theo.\n`!nowplaying` hoặc `!np` — Bài đang phát." },
+				{ name: "📌 Voice", value: "`!join` — Mời bot vào voice. `!leave` — Ra khỏi voice." }
+			);
+		return message.channel.send({ embeds: [helpEmbed] });
+	}
 
 	if (command === "play" || command === "p") {
 		if (!args[0]) return message.channel.send("❌ | Please provide a song name or URL");
