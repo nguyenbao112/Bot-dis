@@ -1,8 +1,22 @@
 require("dotenv").config();
-
+const express = require("express");
 const { PlayerManager } = require("ziplayer");
 const { Client, GatewayIntentBits } = require("discord.js");
 const { SoundCloudPlugin, YouTubePlugin, SpotifyPlugin } = require("@ziplayer/plugin");
+
+// 1. Web Server Keep-Alive giúp Render luôn online
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+	res.send("Bot đang chạy 24/7!");
+});
+
+app.listen(PORT, () => {
+	console.log(`Web server đang chạy ở cổng ${PORT}`);
+});
+
+// 2. Cấu hình Discord Bot & ZiPlayer
 const prefix = "!";
 const client = new Client({
 	intents: [
@@ -17,43 +31,65 @@ const player = new PlayerManager({
 	plugins: [new SoundCloudPlugin(), new YouTubePlugin(), new SpotifyPlugin()],
 });
 
+// Trình lắng nghe sự kiện của Player
 player.on("trackStart", (queue, track) => {
-	queue.userdata.channel.send(`▶ Started playing: **${track.title}**`);
+	if (queue.userdata?.channel) {
+		queue.userdata.channel.send(`▶ Started playing: **${track.title}**`);
+	}
 });
+
 player.on("trackAdd", (queue, track) => {
-	queue.userdata.channel.send(`✅ Added to queue: **${track.title}**`);
+	if (queue.userdata?.channel) {
+		queue.userdata.channel.send(`✅ Added to queue: **${track.title}**`);
+	}
+});
+
+player.on("error", (queue, error) => {
+	console.log(`[${queue.guild.id}] Error emitted from the queue: ${error}`);
+});
+
+player.on("willPlay", (playerInstance, track, upcomming) => {
+	console.log(`${track.title} will play next!`);
+	if (playerInstance.userdata?.channel) {
+		playerInstance.userdata.channel.send(
+			`⏭ | Upcoming: **${track.title}**\n${upcomming.map((t) => `${t.title}`).join("\n")}`
+		);
+	}
 });
 
 client.on("clientReady", () => {
 	console.log(`Logged in as ${client.user.tag}`);
 });
 
+// 3. Xử lý Lệnh
 client.on("messageCreate", async (message) => {
 	if (message.author.bot || !message.guild) return;
 	if (!message.content.startsWith(prefix)) return;
-	const args = message.content.slice(1).trim().split(/ +/g);
+
+	const args = message.content.slice(prefix.length).trim().split(/ +/g);
 	const command = args.shift().toLowerCase();
-	if (command === "play") {
+
+	if (command === "play" || command === "p") {
 		if (!args[0]) return message.channel.send("❌ | Please provide a song name or URL");
 		if (!message.member.voice.channel) return message.channel.send("❌ | You must be in a voice channel");
+
 		const queue = await player.create(message.guild.id, {
 			userdata: {
 				channel: message.channel,
 			},
 			selfDeaf: true,
 		});
+
 		try {
 			if (!queue.connection) await queue.connect(message.member.voice.channel);
 			const success = await queue.play(args.join(" ")).catch((e) => {
-				console.log(e);
-
+				console.log("Play error:", e);
 				return message.channel.send("❌ | No results found");
 			});
 
 			if (success) message.channel.send(`✅ | Enqueued **${args.join(" ")}**`);
 		} catch (e) {
-			console.log(e);
-
+			console.log("Connect error:", e);
 			return message.channel.send("❌ | Could not join your voice channel");
 		}
 		return;
@@ -62,7 +98,7 @@ client.on("messageCreate", async (message) => {
 	const queue = player.get(message.guild.id);
 	if (!queue || !queue.isPlaying) return message.channel.send("❌ | No music is being played");
 
-	if (command === "skip") {
+	if (command === "skip" || command === "s") {
 		queue.skip();
 		message.channel.send("⏭ | Skipped the current track");
 	} else if (command === "autoplay") {
@@ -75,22 +111,22 @@ client.on("messageCreate", async (message) => {
 		if (queue.isPaused) return message.channel.send("❌ | Music is already paused");
 		queue.pause();
 		message.channel.send("⏸ | Paused the music");
-	} else if (command === "resume") {
+	} else if (command === "resume" || command === "r") {
 		if (!queue.isPaused) return message.channel.send("❌ | Music is not paused");
 		queue.resume();
 		message.channel.send("▶ | Resumed the music");
-	} else if (command === "queue") {
+	} else if (command === "queue" || command === "q") {
 		const current = queue.currentTrack;
 		const list = queue.upcomingTracks
 			.map((t, i) => `${i + 1}. ${t.title} - ${t.requestedBy}`)
 			.slice(0, 10)
 			.join("\n");
 		message.channel.send(
-			`**Current Track:**\n${current.title} - ${current.requestedby}\n\n**Queue:**\n${
+			`**Current Track:**\n${current ? `${current.title} - ${current.requestedBy}` : "None"}\n\n**Queue:**\n${
 				list.length > 0 ? list : "No more tracks in the queue"
-			}`,
+			}`
 		);
-	} else if (command === "volume") {
+	} else if (command === "volume" || command === "vol") {
 		if (!args[0]) return message.channel.send(`🔊 | Current volume is: **${queue.volume}**`);
 		const volume = parseInt(args[0]);
 		if (isNaN(volume) || volume < 0 || volume > 100)
@@ -100,33 +136,20 @@ client.on("messageCreate", async (message) => {
 	} else if (command === "nowplaying" || command === "np") {
 		const current = queue.currentTrack;
 		const progress = queue.getProgressBar();
-		message.channel.send(`▶ | Now playing: **${current.title}**\n${progress}`);
+		message.channel.send(`▶ | Now playing: **${current ? current.title : "Unknown"}**\n${progress}`);
 	} else if (command === "leave") {
 		queue.destroy();
 		message.channel.send("👋 | Left the voice channel");
-	} else {
-		message.channel.send("❌ | Unknown command");
 	}
 });
-player.on("error", (queue, error) => {
-	console.log(`[${queue.guild.id}] Error emitted from the queue: ${error}`);
-});
-player.on("debug", console.log);
 
-player.on("willPlay", (player, track, upcomming) => {
-	console.log(`${track.title} will play next!`);
-
-	player.userdata.channel.send(`⏭ | Upcomming: **${track.title}**, and \n${upcomming.map((t) => `${t.title}\n`)}`);
-});
-
-client.login(process.env.TOKEN);
-
+// Xử lý ngoại lệ tránh crash bot
 process.on("uncaughtException", function (err) {
 	console.log("Caught exception: " + err);
-	console.log(err.stack);
 });
 
 process.on("unhandledRejection", function (err) {
-	console.log("Handled exception: " + err);
-	console.log(err.stack);
+	console.log("Handled rejection: " + err);
 });
+
+client.login(process.env.DISCORD_TOKEN || process.env.TOKEN);
