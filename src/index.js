@@ -28,7 +28,7 @@ const client = new Client({
 	],
 });
 
-// === CHỈ SỬA ĐÚNG ĐOẠN NÀY ===
+// === CHỈ SỬA ĐOẠN NÀY ===
 // SoundCloudKeyManager: probe SoundCloud for client_id and auto-refresh periodically.
 // It will not force-recreate the player manager automatically (to avoid disrupting playback),
 // but it will keep the in-memory client id up-to-date and log when a new id is found.
@@ -225,6 +225,23 @@ client.on("messageCreate", async (message) => {
 
 	const args = message.content.slice(prefix.length).trim().split(/ +/g);
 	const command = args.shift().toLowerCase();
+
+	// Lệnh trợ giúp (Help)
+	if (command === "help" || command === "h") {
+		return message.channel.send(
+			"📜 **DANH SÁCH LỆNH BOT NHẠC**\n\n" +
+			"🎵 `!play <tên bài/URL>` (hoặc `!p`): Phát nhạc từ YouTube, Spotify, SoundCloud\n" +
+			"⏭ `!skip` (hoặc `!s`): Bỏ qua bài hát hiện tại\n" +
+			"⏸ `!pause`: Tạm dừng phát nhạc\n" +
+			"▶ `!resume` (hoặc `!r`): Tiếp tục phát nhạc\n" +
+			"⏹ `!stop`: Dừng phát nhạc và xóa hàng đợi\n" +
+			"📜 `!queue` (hoặc `!q`): Xem danh sách bài hát trong hàng đợi\n" +
+			"🔊 `!volume <0-100>` (hoặc `!vol`): Điều chỉnh âm lượng\n" +
+			"🔁 `!autoplay`: Bật/Tắt chế độ tự động phát bài tiếp theo\n" +
+			"🎧 `!nowplaying` (hoặc `!np`): Xem thông tin bài hát đang phát\n" +
+			"👋 `!leave`: Ngắt kết nối bot khỏi kênh thoại"
+		);
+	}
 
 	if (command === "play" || command === "p") {
 		if (!args[0]) return message.channel.send("❌ | Please provide a song name or URL");
