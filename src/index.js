@@ -32,12 +32,18 @@ const manager = new PlayerManager({
     extractorTimeout: 30000,
 });
 
-client.on("ready", () => {
-    console.log(`Bot kết nối thành công: ${client.user.tag}`);
+// Cập nhật dùng clientReady thay cho ready để khắc phục cảnh báo DeprecationWarning
+client.on("clientReady", () => {
+    console.log(`Bot đã sẵn sàng hoạt động: ${client.user.tag}`);
 });
 
 // 3. Xử lý Lệnh
 client.on("messageCreate", async (msg) => {
+    // Dòng log giúp kiểm tra xem bot có thực sự đọc được tin nhắn từ kênh hay không
+    if (msg.content.startsWith("!")) {
+        console.log(`[Message Received] Tác giả: ${msg.author.tag} | Nội dung: ${msg.content}`);
+    }
+
     if (!msg.guildId || msg.author.bot || !msg.content.startsWith("!")) return;
 
     const args = msg.content.slice(1).split(" ");
@@ -55,11 +61,11 @@ client.on("messageCreate", async (msg) => {
 
     const voiceChannel = msg.member?.voice.channel;
 
-    // Kiểm tra quyền (chỉ người gọi bài hát hoặc Admin/Mod)
+    // Kiểm tra quyền (chỉ người gọi bài hát hoặc Admin/Mod mới có quyền thao tác)
     const hasPermission = () => {
         const currentTrack = player.currentTrack;
-        const isAdmin = msg.member.permissions.has(PermissionsBitField.Flags.ManageChannels) || 
-                        msg.member.permissions.has(PermissionsBitField.Flags.Administrator);
+        const isAdmin = msg.member?.permissions.has(PermissionsBitField.Flags.ManageChannels) || 
+                        msg.member?.permissions.has(PermissionsBitField.Flags.Administrator);
         
         if (!currentTrack) return true;
         return currentTrack.requestedBy === msg.author.id || isAdmin;
@@ -89,6 +95,7 @@ client.on("messageCreate", async (msg) => {
             break;
 
         case "resume":
+        case "r":
             if (!hasPermission()) return msg.reply("❌ Chỉ người thêm bài hát hoặc Admin mới có quyền phát tiếp!");
             player.resume();
             msg.reply("▶️ Tiếp tục phát.");
@@ -107,13 +114,52 @@ client.on("messageCreate", async (msg) => {
             msg.reply("⏹️ Đã dừng nhạc và xóa hàng đợi.");
             break;
 
+        case "volume":
+        case "vol":
+            const vol = parseInt(query);
+            if (isNaN(vol) || vol < 0 || vol > 200) {
+                return msg.reply("⚠️ Âm lượng phải là một số từ 0 đến 200!");
+            }
+            player.setVolume(vol);
+            msg.reply(`🔊 Đã chỉnh âm lượng thành: **${vol}%**`);
+            break;
+
         case "queue":
         case "q":
             const tracks = player.upcomingTracks.slice(0, 10);
             const embed = new EmbedBuilder()
                 .setTitle("🎶 Hàng Đợi")
+                .setColor("#0099ff")
                 .setDescription(tracks.map((t, i) => `${i + 1}. **${t.title}**`).join("\n") || "Hàng đợi trống.");
             msg.reply({ embeds: [embed] });
+            break;
+
+        case "np":
+        case "nowplaying":
+            const track = player.currentTrack;
+            if (!track) return msg.reply("❌ Hiện tại không có bài hát nào đang phát!");
+
+            const progress = player.getProgressBar({ size: 15 });
+            const time = player.getTime();
+
+            const npEmbed = new EmbedBuilder()
+                .setTitle("🎧 Đang Phát")
+                .setDescription(`**[${track.title}](${track.url})**\n\n\`${progress}\`\n${time.formatted.current} / ${time.formatted.total}`)
+                .setThumbnail(track.thumbnail || null)
+                .setColor("#00ff00");
+
+            msg.reply({ embeds: [npEmbed] });
+            break;
+
+        case "help":
+            const helpEmbed = new EmbedBuilder()
+                .setTitle("📖 DANH SÁCH LỆNH BOT")
+                .setColor("#00ff00")
+                .addFields(
+                    { name: "▶️ Phát & Điều Khiển", value: "`!play <tên/link>` hoặc `!p` - Phát nhạc\n`!pause` - Tạm dừng\n`!resume` hoặc `!r` - Tiếp tục\n`!skip` hoặc `!s` - Chuyển bài\n`!stop` - Dừng nhạc" },
+                    { name: "⚙️ Tùy Chỉnh & Hàng Đợi", value: "`!queue` hoặc `!q` - Xem danh sách chờ\n`!nowplaying` hoặc `!np` - Bài đang phát\n`!volume <0-200>` - Chỉnh âm lượng" }
+                );
+            msg.reply({ embeds: [helpEmbed] });
             break;
     }
 });
