@@ -1,9 +1,19 @@
 {
-	"dependencies": {
-		"@discordjs/voice": "^0.19.0",
-		"@ziplayer/plugin": "file:../../plugins",
-		"discord.js": "^14.22.1",
-		"dotenv": "^17.2.2",
-		"ziplayer": "file:../../core"
-	}
+  "name": "ziplayer-discord-bot",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@discordjs/opus": "^0.9.0",
+    "@discordjs/voice": "^0.19.0",
+    "@ziplayer/plugin": "^1.0.0",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "ffmpeg-static": "^5.2.0",
+    "ziplayer": "^1.0.0"
+  }
 }
