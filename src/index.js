@@ -1,202 +1,132 @@
-import { PlayerManager } from "ziplayer";
-import { Client, GatewayIntentBits } from "discord.js";
-import { SoundCloudPlugin, YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
-import express from "express";
-import dotenv from "dotenv";
-dotenv.config();
+require("dotenv").config();
 
-// 1. Web Server Keep-Alive cho Render
-const app = express();
-const PORT = process.env.PORT || 3000;
-app.get("/", (req, res) => res.send("Bot đang chạy 24/7!"));
-app.listen(PORT, () => console.log(`Web server đang chạy ở cổng ${PORT}`));
-
-// 2. Cấu hình Discord Bot
+const { PlayerManager } = require("ziplayer");
+const { Client, GatewayIntentBits } = require("discord.js");
+const { SoundCloudPlugin, YouTubePlugin, SpotifyPlugin } = require("@ziplayer/plugin");
+const prefix = "!";
 const client = new Client({
 	intents: [
 		GatewayIntentBits.Guilds,
-		GatewayIntentBits.GuildVoiceStates,
 		GatewayIntentBits.GuildMessages,
+		GatewayIntentBits.GuildVoiceStates,
 		GatewayIntentBits.MessageContent,
-		GatewayIntentBits.GuildMembers,
 	],
 });
 
-// Setup plugins & Player Manager
-const soundcloudPlugin = new SoundCloudPlugin();
-const youtubePlugin = new YouTubePlugin();
-const spotifyPlugin = new SpotifyPlugin();
-
-const manager = new PlayerManager({
-	plugins: [soundcloudPlugin, youtubePlugin, spotifyPlugin],
+const player = new PlayerManager({
+	plugins: [new SoundCloudPlugin(), new YouTubePlugin(), new SpotifyPlugin()],
 });
 
-// Lắng nghe sự kiện đăng nhập
+player.on("trackStart", (queue, track) => {
+	queue.userdata.channel.send(`▶ Started playing: **${track.title}**`);
+});
+player.on("trackAdd", (queue, track) => {
+	queue.userdata.channel.send(`✅ Added to queue: **${track.title}**`);
+});
+
 client.on("clientReady", () => {
-	console.log(`Logged in as ${client.user?.tag}`);
+	console.log(`Logged in as ${client.user.tag}`);
 });
 
-// 3. Xử lý Lệnh Tin Nhắn
 client.on("messageCreate", async (message) => {
 	if (message.author.bot || !message.guild) return;
-	
-	if (message.content.startsWith("!")) {
-		console.log(`[Message Received] ${message.author.tag}: ${message.content}`);
-	} else {
+	if (!message.content.startsWith(prefix)) return;
+	const args = message.content.slice(1).trim().split(/ +/g);
+	const command = args.shift().toLowerCase();
+	if (command === "play") {
+		if (!args[0]) return message.channel.send("❌ | Please provide a song name or URL");
+		if (!message.member.voice.channel) return message.channel.send("❌ | You must be in a voice channel");
+		const queue = await player.create(message.guild.id, {
+			userdata: {
+				channel: message.channel,
+			},
+			selfDeaf: true,
+		});
+		try {
+			if (!queue.connection) await queue.connect(message.member.voice.channel);
+			const success = await queue.play(args.join(" ")).catch((e) => {
+				console.log(e);
+
+				return message.channel.send("❌ | No results found");
+			});
+
+			if (success) message.channel.send(`✅ | Enqueued **${args.join(" ")}**`);
+		} catch (e) {
+			console.log(e);
+
+			return message.channel.send("❌ | Could not join your voice channel");
+		}
 		return;
 	}
 
-	const args = message.content.slice(1).trim().split(/ +/);
-	const command = args.shift()?.toLowerCase();
+	const queue = player.get(message.guild.id);
+	if (!queue || !queue.isPlaying) return message.channel.send("❌ | No music is being played");
 
-	if (command === "play" || command === "p") {
-		const query = args.join(" ");
-		if (!query) return message.reply("Please provide a song to play!");
-
-		const member = message.member;
-		const voiceChannel = member?.voice.channel;
-
-		if (!voiceChannel) {
-			return message.reply("You need to be in a voice channel!");
-		}
-
-		// Kiểm tra quyền kết nối và nói trong kênh voice
-		const permissions = voiceChannel.permissionsFor(message.client.user);
-		if (!permissions.has("Connect") || !permissions.has("Speak")) {
-			return message.reply("❌ Bot needs Connect and Speak permissions in your voice channel!");
-		}
-
-		try {
-			const player = await manager.create(message.guild.id, {
-				leaveOnEnd: false,
-				leaveOnEmpty: false,
-				userdata: {
-					voiceChannel: voiceChannel,
-					textChannel: message.channel,
-				},
-			});
-
-			if (!player.connection) {
-				await player.connect(voiceChannel);
-			}
-
-			const success = await player.play(query, message.author.id);
-
-			if (success) {
-				message.reply(`🎵 Added to queue: **${query}**`);
-			} else {
-				message.reply("❌ Failed to add song to queue");
-			}
-		} catch (error) {
-			console.error("Play command error:", error);
-			message.reply("❌ An error occurred while trying to play the song");
-		}
-	}
-
-	if (command === "skip" || command === "s") {
-		const player = manager.get(message.guild.id);
-		if (!player) return message.reply("No music is playing!");
-
-		player.skip();
-		message.reply("⏭️ Skipped current track");
-	}
-
-	if (command === "pause") {
-		const player = manager.get(message.guild.id);
-		if (!player) return message.reply("No music is playing!");
-
-		if (player.pause()) {
-			message.reply("⏸️ Paused playback");
-		} else {
-			message.reply("❌ Could not pause playback");
-		}
-	}
-
-	if (command === "resume" || command === "r") {
-		const player = manager.get(message.guild.id);
-		if (!player) return message.reply("No music is playing!");
-
-		if (player.resume()) {
-			message.reply("▶️ Resumed playback");
-		} else {
-			message.reply("❌ Could not resume playback");
-		}
-	}
-
-	if (command === "queue" || command === "q") {
-		const player = manager.get(message.guild.id);
-		if (!player || player.queueSize === 0) {
-			return message.reply("Queue is empty!");
-		}
-
-		const current = player.currentTrack;
-		const upcoming = player.upcomingTracks.slice(0, 10);
-
-		let queueText = "";
-		if (current) {
-			queueText += `**Now Playing:** ${current.title}\n\n`;
-		}
-
-		if (upcoming.length > 0) {
-			queueText += "**Up Next:**\n";
-			upcoming.forEach((track, index) => {
-				queueText += `${index + 1}. ${track.title}\n`;
-			});
-		}
-
-		message.reply(queueText || "Queue is empty!");
-	}
-
-	if (command === "volume" || command === "vol") {
-		const player = manager.get(message.guild.id);
-		if (!player) return message.reply("No music is playing!");
-
+	if (command === "skip") {
+		queue.skip();
+		message.channel.send("⏭ | Skipped the current track");
+	} else if (command === "autoplay") {
+		queue.queue.autoPlay(!queue.queue.autoPlay());
+		message.channel.send(`🔁 | Autoplay is now: **${queue.queue.autoPlay() ? "Enabled" : "Disabled"}**`);
+	} else if (command === "stop") {
+		queue.stop();
+		message.channel.send("⏹ | Stopped the music and cleared the queue");
+	} else if (command === "pause") {
+		if (queue.isPaused) return message.channel.send("❌ | Music is already paused");
+		queue.pause();
+		message.channel.send("⏸ | Paused the music");
+	} else if (command === "resume") {
+		if (!queue.isPaused) return message.channel.send("❌ | Music is not paused");
+		queue.resume();
+		message.channel.send("▶ | Resumed the music");
+	} else if (command === "queue") {
+		const current = queue.currentTrack;
+		const list = queue.upcomingTracks
+			.map((t, i) => `${i + 1}. ${t.title} - ${t.requestedBy}`)
+			.slice(0, 10)
+			.join("\n");
+		message.channel.send(
+			`**Current Track:**\n${current.title} - ${current.requestedby}\n\n**Queue:**\n${
+				list.length > 0 ? list : "No more tracks in the queue"
+			}`,
+		);
+	} else if (command === "volume") {
+		if (!args[0]) return message.channel.send(`🔊 | Current volume is: **${queue.volume}**`);
 		const volume = parseInt(args[0]);
-		if (isNaN(volume) || volume < 0 || volume > 200) {
-			return message.reply("Please provide a volume between 0 and 200!");
-		}
-
-		player.setVolume(volume);
-		message.reply(`🔊 Volume set to ${volume}%`);
-	}
-
-	if (command === "stop") {
-		const player = manager.get(message.guild.id);
-		if (!player) return message.reply("No music is playing!");
-
-		player.stop();
-		message.reply("⏹️ Stopped playback and cleared queue");
-	}
-
-	if (command === "shuffle") {
-		const player = manager.get(message.guild.id);
-		if (!player || player.queueSize === 0) {
-			return message.reply("Queue is empty!");
-		}
-
-		player.shuffle();
-		message.reply("🔀 Shuffled the queue");
+		if (isNaN(volume) || volume < 0 || volume > 100)
+			return message.channel.send("❌ | Volume must be a number between 0 and 100");
+		queue.setVolume(volume);
+		message.channel.send(`🔊 | Volume set to: **${volume}**`);
+	} else if (command === "nowplaying" || command === "np") {
+		const current = queue.currentTrack;
+		const progress = queue.getProgressBar();
+		message.channel.send(`▶ | Now playing: **${current.title}**\n${progress}`);
+	} else if (command === "leave") {
+		queue.destroy();
+		message.channel.send("👋 | Left the voice channel");
+	} else {
+		message.channel.send("❌ | Unknown command");
 	}
 });
+player.on("error", (queue, error) => {
+	console.log(`[${queue.guild.id}] Error emitted from the queue: ${error}`);
+});
+player.on("debug", console.log);
 
-// Event listeners cho Player Manager
-manager.on("trackStart", (player, track) => {
-	player.userdata.textChannel.send(`🎶 Now playing: **${track.title}**`);
-	console.log(`Started playing: ${track.title} in guild ${player.guildId}`);
+player.on("willPlay", (player, track, upcomming) => {
+	console.log(`${track.title} will play next!`);
+
+	player.userdata.channel.send(`⏭ | Upcomming: **${track.title}**, and \n${upcomming.map((t) => `${t.title}\n`)}`);
 });
 
-manager.on("trackEnd", (player, track) => {
-	player.userdata.textChannel.send(`✅ Finished playing: **${track.title}**`);
-	console.log(`Finished playing: ${track.title} in guild ${player.guildId}`);
+client.login(process.env.TOKEN);
+
+process.on("uncaughtException", function (err) {
+	console.log("Caught exception: " + err);
+	console.log(err.stack);
 });
 
-manager.on("queueEnd", (player) => {
-	player.userdata.textChannel.send("🏁 Queue has ended.");
-	console.log(`Queue ended in guild ${player.guildId}`);
+process.on("unhandledRejection", function (err) {
+	console.log("Handled exception: " + err);
+	console.log(err.stack);
 });
-
-manager.on("playerError", (player, error, track) => {
-	console.error(`Player error in guild ${player.guildId}:`, error.message);
-});
-
-client.login(process.env.DISCORD_TOKEN);
