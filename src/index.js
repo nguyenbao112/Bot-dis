@@ -12,7 +12,18 @@ import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
 
 /* =========================================================
-   1. KIỂM TRA MÔI TRƯỜNG & KHỞI TẠO WEB SERVER (CHỐNG CRASH)
+   0. CHỐNG CRASH TOÀN CỤC TRÊN RENDER (BẮT LỖI FETCH/STREAM)
+========================================================= */
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("⚠️ [Chống Sập Bot] Bắt lỗi Unhandled Rejection:", reason?.message || reason);
+});
+
+process.on("uncaughtException", (err, origin) => {
+  console.error("⚠️ [Chống Sập Bot] Bắt lỗi Uncaught Exception:", err?.message || err);
+});
+
+/* =========================================================
+   1. KIỂM TRA MÔI TRƯỜNG & KHỞI TẠO WEB SERVER
 ========================================================= */
 const token = process.env.DISCORD_TOKEN?.trim();
 if (!token) {
@@ -117,7 +128,7 @@ function cleanQuery(input) {
 }
 
 /* =========================================================
-   4. KHỞI TẠO DISCORD CLIENT & PLAYER MANAGER
+   4. KHỞI TẠO DISCORD CLIENT & PLAYER MANAGER (CẤU HÌNH BẢO VỆ)
 ========================================================= */
 const client = new Client({
   intents: [
@@ -140,12 +151,13 @@ const manager = new PlayerManager({
         filter: "audioonly",
         quality: "highestaudio",
         highWaterMark: 1 << 25,
-        dlChunkSize: 0,
+        dlChunkSize: 1024 * 1024, // Giới hạn chunk size tránh nghẽn
         requestOptions: {
           headers: {
             "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             Cookie: FORMATTED_COOKIE,
+            Connection: "keep-alive",
           },
         },
       },
@@ -154,7 +166,7 @@ const manager = new PlayerManager({
     new InfinityPlugin(),
   ],
   autoCleanup: true,
-  extractorTimeout: 30000,
+  extractorTimeout: 45000, // Tăng thời gian chờ stream lên 45 giây cho Render
   enableSearchCache: true,
 });
 
@@ -181,9 +193,9 @@ manager.on("trackStart", async (player, track) => {
       { name: "📻 Nguồn", value: track.source?.toUpperCase() || "UNKNOWN", inline: true },
       { name: "👤 Người yêu cầu", value: requester ? requester.tag : "Không rõ", inline: true }
     )
-    .setFooter({ text: "ZiPlayer Core Engine • Render Ready" });
+    .setFooter({ text: "ZiPlayer Core Engine • Render Anti-Crash Enabled" });
 
-  await channel.send({ embeds: [embed] });
+  await channel.send({ embeds: [embed] }).catch(() => null);
 });
 
 manager.on("queueEnd", async (player) => {
@@ -195,11 +207,12 @@ manager.on("queueEnd", async (player) => {
           .setColor(0x8b5cf6)
           .setDescription("✅ Hàng đợi đã kết thúc. Bot đã rời kênh thoại."),
       ],
-    });
+    }).catch(() => null);
   }
 });
 
 manager.on("playerError", async (player, error, track) => {
+  console.error(`[Player Error] Bài hát: ${track?.title} | Lỗi:`, error?.message || error);
   const channel = client.channels.cache.get(player.textChannelId);
   if (channel) {
     await channel.send({
@@ -207,9 +220,9 @@ manager.on("playerError", async (player, error, track) => {
         new EmbedBuilder()
           .setColor(0xef4444)
           .setTitle("❌ Lỗi Trình Phát Nhạc")
-          .setDescription(`Không thể tải bài: **${track?.title ?? "Unknown"}**\n\`${error.message}\``),
+          .setDescription(`Không thể tải luồng phát: **${track?.title ?? "Unknown"}**\n\`${error?.message || "Kênh kết nối bị gián đoạn"}\``),
       ],
-    });
+    }).catch(() => null);
   }
 });
 
@@ -239,7 +252,7 @@ client.on(Events.MessageCreate, async (msg) => {
       antiStuck: {
         enabled: true,
         maxRetries: 3,
-        retryDelayMs: 1000,
+        retryDelayMs: 1500,
         reduceQualityOnRetry: true,
       },
       loudnessNormalization: { enabled: false },
@@ -256,7 +269,7 @@ client.on(Events.MessageCreate, async (msg) => {
     return isRequester || isMod;
   }
 
-  const reply = (embed) => msg.reply({ embeds: [embed] });
+  const reply = (embed) => msg.reply({ embeds: [embed] }).catch(() => null);
 
   switch (command) {
     case "play":
@@ -268,7 +281,11 @@ client.on(Events.MessageCreate, async (msg) => {
       const player = await getPlayer();
       if (!player.connection) await player.connect(voiceChannel);
 
-      const success = await player.play(cleanedQuery, msg.author.id);
+      const success = await player.play(cleanedQuery, msg.author.id).catch((err) => {
+        console.error("Lỗi khi thực thi player.play:", err?.message || err);
+        return false;
+      });
+
       if (!success) return reply(errEmbed("Không tìm thấy kết quả hoặc không thể tải luồng phát nhạc."));
 
       if (player.isPlaying && player.currentTrack?.requestedBy !== msg.author.id) {
