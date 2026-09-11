@@ -28,12 +28,31 @@ const client = new Client({
 });
 
 // === CHỈ SỬA ĐÚNG ĐOẠN NÀY ===
-const soundcloudPlugin = new SoundCloudPlugin({
-	clientId: process.env.SOUNDCLOUD_CLIENT_ID || "KKzJxmw11tYpCs6T24P4uUYhqmjalG6M"
-});
+// Ensure we provide a valid SoundCloud client id to the plugin. The plugin expects the option
+// key `client_id` (snake_case). If the env var is missing, we skip adding the plugin to avoid
+// the runtime error "Cannot get client_id from SoundCloud".
+const soundcloudClientId = process.env.SOUNDCLOUD_CLIENT_ID || process.env.SOUNDCLOUD_CLIENTID || "KKzJxmw11tYpCs6T24P4uUYhqmjalG6M";
+
+let soundcloudPlugin = null;
+if (!soundcloudClientId) {
+	console.warn("[SoundCloud] SOUNDCLOUD_CLIENT_ID is not set. SoundCloud support will be disabled.");
+} else {
+	// Provide both keys to be compatible with different versions of the plugin
+	soundcloudPlugin = new SoundCloudPlugin({
+		client_id: soundcloudClientId,
+		clientId: soundcloudClientId,
+	});
+}
+
+const plugins = [
+	// only include the SoundCloud plugin when we have a client id
+	...(soundcloudPlugin ? [soundcloudPlugin] : []),
+	new YouTubePlugin(),
+	new SpotifyPlugin(),
+];
 
 const player = new PlayerManager({
-	plugins: [soundcloudPlugin, new YouTubePlugin(), new SpotifyPlugin()],
+	plugins,
 });
 // =============================
 
