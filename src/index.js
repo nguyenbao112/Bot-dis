@@ -28,32 +28,41 @@ const client = new Client({
 });
 
 // === CHỈ SỬA ĐÚNG ĐOẠN NÀY ===
-// Ensure we provide a valid SoundCloud client id to the plugin. The plugin expects the option
-// key `client_id` (snake_case). If the env var is missing, we skip adding the plugin to avoid
-// the runtime error "Cannot get client_id from SoundCloud".
-const soundcloudClientId = process.env.SOUNDCLOUD_CLIENT_ID || process.env.SOUNDCLOUD_CLIENTID || "KKzJxmw11tYpCs6T24P4uUYhqmjalG6M";
+// Use SOUNDCLOUD_CLIENT_ID from environment only. Do NOT store client id in code.
+const soundcloudClientId = process.env.SOUNDCLOUD_CLIENT_ID || process.env.SOUNDCLOUD_CLIENTID || null;
 
 let soundcloudPlugin = null;
-if (!soundcloudClientId) {
-	console.warn("[SoundCloud] SOUNDCLOUD_CLIENT_ID is not set. SoundCloud support will be disabled.");
+if (soundcloudClientId) {
+	console.log("[SoundCloud] SOUNDCLOUD_CLIENT_ID provided.");
+	try {
+		soundcloudPlugin = new SoundCloudPlugin({
+			// provide both keys in case of different plugin versions
+			client_id: soundcloudClientId,
+			clientId: soundcloudClientId,
+		});
+	} catch (err) {
+		console.error("[SoundCloud] Failed to initialize SoundCloudPlugin:", err && err.stack ? err.stack : err);
+		soundcloudPlugin = null;
+	}
 } else {
-	// Provide both keys to be compatible with different versions of the plugin
-	soundcloudPlugin = new SoundCloudPlugin({
-		client_id: soundcloudClientId,
-		clientId: soundcloudClientId,
-	});
+	console.warn("[SoundCloud] SOUNDCLOUD_CLIENT_ID not set. SoundCloud support disabled.");
 }
 
 const plugins = [
-	// only include the SoundCloud plugin when we have a client id
 	...(soundcloudPlugin ? [soundcloudPlugin] : []),
 	new YouTubePlugin(),
 	new SpotifyPlugin(),
 ];
 
-const player = new PlayerManager({
-	plugins,
-});
+let player;
+try {
+	player = new PlayerManager({
+		plugins,
+	});
+} catch (err) {
+	console.error("[PlayerManager] failed to initialize:", err && err.stack ? err.stack : err);
+	throw err;
+}
 // =============================
 
 // Trình lắng nghe sự kiện của Player
@@ -108,13 +117,13 @@ client.on("messageCreate", async (message) => {
 		try {
 			if (!queue.connection) await queue.connect(message.member.voice.channel);
 			const success = await queue.play(args.join(" ")).catch((e) => {
-				console.log("Play error:", e);
+				console.log("Play error:", e && e.stack ? e.stack : e);
 				return message.channel.send("❌ | No results found");
 			});
 
 			if (success) message.channel.send(`✅ | Enqueued **${args.join(" ")}**`);
 		} catch (e) {
-			console.log("Connect error:", e);
+			console.log("Connect error:", e && e.stack ? e.stack : e);
 			return message.channel.send("❌ | Could not join your voice channel");
 		}
 		return;
@@ -170,11 +179,11 @@ client.on("messageCreate", async (message) => {
 
 // Xử lý ngoại lệ tránh crash bot
 process.on("uncaughtException", function (err) {
-	console.log("Caught exception: " + err);
+	console.error("Caught exception:", err && err.stack ? err.stack : err);
 });
 
 process.on("unhandledRejection", function (err) {
-	console.log("Handled rejection: " + err);
+	console.error("Unhandled rejection:", err && err.stack ? err.stack : err);
 });
 
 client.login(process.env.DISCORD_TOKEN || process.env.TOKEN);
