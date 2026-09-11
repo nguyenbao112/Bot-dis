@@ -7,124 +7,25 @@ import {
   PermissionFlagsBits,
   Events,
 } from "discord.js";
-import { PlayerManager } from "ziplayer";
-import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
-import { InfinityPlugin } from "@ziplayer/infinity";
+import { PlayerManager } from "ziplayer";[span_2](start_span)[span_2](end_span)
+import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";[span_3](start_span)[span_3](end_span)
+import { InfinityPlugin } from "@ziplayer/infinity";[span_4](start_span)[span_4](end_span)
 
 /* =========================================================
-   0. CHỐNG CRASH TOÀN CỤC TRÊN RENDER
+   1. KHỞI TẠO HTTP SERVER (ĐỂ RENDER FREE KHÔNG LỖI PORT)
 ========================================================= */
-process.on("unhandledRejection", (reason) => {
-  console.error("⚠️ Bắt lỗi Unhandled Rejection:", reason?.message || reason);
-});
-
-process.on("uncaughtException", (err) => {
-  console.error("⚠️ Bắt lỗi Uncaught Exception:", err?.message || err);
-});
-
-/* =========================================================
-   1. KIỂM TRA MÔI TRƯỜNG & KHỞI TẠO WEB SERVER
-========================================================= */
-const token = process.env.DISCORD_TOKEN?.trim();
-if (!token) {
-  console.error("❌ ERROR: Chưa cài đặt DISCORD_TOKEN trong Environment!");
-  process.exit(1);
-}
-
 const PORT = process.env.PORT || 10000;
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("ZiPlayer Bot Online 24/7!");
-});
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Web server đang chạy ở cổng ${PORT}`);
-});
-
-server.on("error", (err) => {
-  if (err.code !== "EADDRINUSE") console.error("❌ Lỗi Server:", err);
-});
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("ZiPlayer Bot is running perfectly!");
+  })
+  .listen(PORT, "0.0.0.0", () => {
+    console.log(`🌐 Web server HTTP đang chạy trên cổng ${PORT}`);
+  });
 
 /* =========================================================
-   2. XỬ LÝ COOKIE YOUTUBE NETSCAPE
-========================================================= */
-function parseNetscapeCookie(cookieRaw) {
-  if (!cookieRaw) return "";
-  if (!cookieRaw.includes("\t") && cookieRaw.includes("=")) {
-    return cookieRaw.trim();
-  }
-  const lines = cookieRaw.split("\n");
-  const cookies = [];
-  for (const line of lines) {
-    if (line.startsWith("#") || !line.trim()) continue;
-    const parts = line.split("\t");
-    if (parts.length >= 7) {
-      cookies.push(`${parts[5].trim()}=${parts[6].trim()}`);
-    }
-  }
-  return cookies.join("; ");
-}
-
-const BACKUP_COOKIE = `.youtube.com	TRUE	/	TRUE	1787988280	GPS	1
-.youtube.com	TRUE	/	TRUE	1822546590	PREF	f6=40000000&tz=Asia.Saigon
-.youtube.com	TRUE	/	TRUE	1819522589	__Secure-1PSIDTS	sidts-CjUBXMw41YejFAqpzVEi3r8vWyT-8I0ttNYiDpkEDtAM32OrbZa9uSBj99NBIa6KlEOtdVQcHBAA
-.youtube.com	TRUE	/	TRUE	1819522589	__Secure-3PSIDTS	sidts-CjUBXMw41YejFAqpzVEi3r8vWyT-8I0ttNYiDpkEDtAM32OrbZa9uSBj99NBIa6KlEOtdVQcHBAA
-.youtube.com	TRUE	/	FALSE	1822546589	HSID	AlzGNN5GLQ_s5EZaY
-.youtube.com	TRUE	/	TRUE	1822546589	SSID	AaH7WuLjIxpibBgiJ
-.youtube.com	TRUE	/	FALSE	1822546589	APISID	Y6lNr8DXLZWr1ffQ/AjuUTSTDb4KlXQM5Y
-.youtube.com	TRUE	/	TRUE	1822546589	SAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
-.youtube.com	TRUE	/	TRUE	1822546589	__Secure-1PAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
-.youtube.com	TRUE	/	TRUE	1822546589	__Secure-3PAPISID	YqxkU_WVEqnS-Nmw/ApOvtePEg2bsH5Jbs
-.youtube.com	TRUE	/	FALSE	1822546589	SID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPeaiAfccW8YV0g2QHXwkbdwACgYKAfwSARISFQHGX2MilDc0HmxxU10JBnB4aMZLuRoVAUF8yKoNfAwNijxtSK8T24yoN0810076
-.youtube.com	TRUE	/	TRUE	1822546589	__Secure-1PSID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPNA5MGdPr9Q7P4p1YS6ycZAACgYKAXQSARISFQHGX2MiPIgGlv_F4rVgOW7yqeJjbhoVAUF8yKovfghXmXc_BIbPN5mgaJNF0076
-.youtube.com	TRUE	/	TRUE	1822546589	__Secure-3PSID	g.a000CAmi6X5l2br81ARbqb40pkXp7BrNKTGZyYQCpnur7CZVzGCPa1DxViXJFaQL_TkUU17m6QACgYKAa8SARISFQHGX2MiDTQbanLPNpOqd0S9IzkkyBoVAUF8yKoS9JGPILD374mqCBWXXJV30076
-.youtube.com	TRUE	/	TRUE	1822546589	LOGIN_INFO	AFmmF2swRgIhAKJtaS7QJYyEjGqDL5joJpMi2QsCWyUbK8FL9nGVUVyaAiEAkFpenOac1UVe_HiQ3n7Uajfsj6P02n-Mtiaxirrp5DQ:QUQ3MjNmejR4alpITXQ5ajZZN1hkTFJ4NDVicDhBZEp6cHhTTFRkc09ZRFl5TGxhOWZaa0pGbS1MQzdtaG9aVUxJM1JLU2U3TEVXbTlBbTlkSXVkUWUtdGZYeVdQaWt1YVBBOFJHUEdZaGx4MHdscWdKUy11MlkyallwTk5pTUl3YkVZMjZ6TGpYZEVIckpsRnY2Z2N6d1ZYU3VDeEZnZTZ3
-.youtube.com	TRUE	/	FALSE	1819522592	SIDCC	AKEyXzU01kp87k0-3TKE-i_h300LKlB-bZF-f8_K4hXvBXqto2B6dfRzQVzlDYDswlZ0bTTx
-.youtube.com	TRUE	/	TRUE	1819522592	__Secure-1PSIDCC	AKEyXzWw3Hoa4EM24wj6_s8iq-rwq0V5dQ69sn93oFxpj_MZ31fUrPBcM4RNK39DdI7LL3jYZQ
-.youtube.com	TRUE	/	TRUE	1819522592	__Secure-3PSIDCC	AKEyXzWQ5tfbJbjMn0Kf-0s0xhi--amIqm4umYo3Mef7pRQZX1Ii1_PAroJCLFgt4aDrFORvlA`;
-
-const FORMATTED_COOKIE = parseNetscapeCookie(process.env.YT_COOKIE || BACKUP_COOKIE);
-
-/* =========================================================
-   3. HELPER FUNCTIONS
-========================================================= */
-function errEmbed(message) {
-  return new EmbedBuilder().setColor(0xef4444).setDescription(`❌ ${message}`);
-}
-
-function formatDuration(ms) {
-  if (!ms || isNaN(ms)) return "00:00";
-  const seconds = Math.floor((ms / 1000) % 60);
-  const minutes = Math.floor((ms / (1000 * 60)) % 60);
-  const hours = Math.floor(ms / (1000 * 60 * 60));
-  const pad = (num) => String(num).padStart(2, "0");
-  return hours > 0
-    ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
-    : `${pad(minutes)}:${pad(seconds)}`;
-}
-
-function cleanQuery(input) {
-  if (!input) return input;
-  let clean = input.trim();
-  if (clean.includes("youtu.be/")) {
-    const id = clean.split("youtu.be/")[1].split("?")[0].split("&")[0];
-    return `https://www.youtube.com/watch?v=${id}`;
-  }
-  if (clean.includes("youtube.com") || clean.includes("youtu.be")) {
-    try {
-      const url = new URL(clean);
-      url.searchParams.delete("si");
-      url.searchParams.delete("pp");
-      return url.toString();
-    } catch {
-      return clean.split("?si=")[0];
-    }
-  }
-  return clean;
-}
-
-/* =========================================================
-   4. KHỞI TẠO DISCORD CLIENT & PLAYER MANAGER
+   2. KHỞI TẠO CLIENT & PLAYER MANAGER (CÓ FALLBACK PLUGIN)
 ========================================================= */
 const client = new Client({
   intents: [
@@ -136,60 +37,42 @@ const client = new Client({
   ],
 });
 
-// Thứ tự Plugin ưu tiên: InfinityPlugin sẽ làm Fallback cực tốt nếu YT/SoundCloud lỗi
+// Sử dụng InfinityPlugin đứng trước để làm dự phòng khi YouTube bị chặn IP trên Render Free[span_5](start_span)[span_5](end_span)
 const manager = new PlayerManager({
   plugins: [
-    new InfinityPlugin(), 
+    new InfinityPlugin(),
     new YouTubePlugin({
-      highWaterMark: 1 << 25,
+      highWaterMark: 1 << 24,
       quality: "highestaudio",
-      cookies: FORMATTED_COOKIE,
-      sabrOptions: { enabled: false },
-      ytdlOptions: {
-        filter: "audioonly",
-        quality: "highestaudio",
-        highWaterMark: 1 << 25,
-        dlChunkSize: 0,
-        requestOptions: {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            Cookie: FORMATTED_COOKIE,
-          },
-        },
-      },
     }),
     new SpotifyPlugin(),
   ],
-  autoCleanup: true,
-  extractorTimeout: 45000,
-  enableSearchCache: true,
+  autoCleanup: true,[span_6](start_span)[span_6](end_span)
+  extractorTimeout: 30000,[span_7](start_span)[span_7](end_span)
+  enableSearchCache: true,[span_8](start_span)[span_8](end_span)
 });
 
 /* =========================================================
-   5. SỰ KIỆN PLAYER
+   3. SỰ KIỆN TRÌNH PHÁT NHẠC (PLAYER EVENTS)
 ========================================================= */
 manager.on("trackStart", async (player, track) => {
   const channel = client.channels.cache.get(player.textChannelId);
   if (!channel) return;
 
-  const requester = await client.users.fetch(track.requestedBy).catch(() => null);
-
   const embed = new EmbedBuilder()
     .setColor(0x6366f1)
-    .setTitle("🎵 Đang Phát Bài Hát")
+    .setTitle("🎶 Đang Phát Bài Hát")
     .setDescription(`**[${track.title}](${track.url})**`)
-    .setThumbnail(track.thumbnail ?? null)
+    .setThumbnail(track.thumbnail || null)
     .addFields(
       {
         name: "⏱ Thời lượng",
-        value: track.isLive ? "🔴 Trực tiếp" : formatDuration(track.duration),
+        value: track.isLive ? "🔴 Trực tiếp" : formatMs(track.duration),
         inline: true,
       },
-      { name: "📻 Nguồn", value: track.source?.toUpperCase() || "UNKNOWN", inline: true },
-      { name: "👤 Người yêu cầu", value: requester ? requester.tag : "Không rõ", inline: true }
-    )
-    .setFooter({ text: "ZiPlayer Core Engine • Render Ready" });
+      { name: "📻 Nguồn", value: (track.source || "Unknown").toUpperCase(), inline: true },
+      { name: "👤 Người yêu cầu", value: `<@${track.requestedBy}>`, inline: true }
+    );
 
   await channel.send({ embeds: [embed] }).catch(() => null);
 });
@@ -197,7 +80,7 @@ manager.on("trackStart", async (player, track) => {
 manager.on("queueEnd", async (player) => {
   const channel = client.channels.cache.get(player.textChannelId);
   if (channel) {
-    await channel.send({
+    channel.send({
       embeds: [
         new EmbedBuilder()
           .setColor(0x8b5cf6)
@@ -208,30 +91,28 @@ manager.on("queueEnd", async (player) => {
 });
 
 manager.on("playerError", async (player, error, track) => {
-  console.error("Player Error:", error?.message || error);
+  console.error("Lỗi bài hát:", error?.message || error);
   const channel = client.channels.cache.get(player.textChannelId);
   if (channel) {
-    await channel.send({
+    channel.send({
       embeds: [
         new EmbedBuilder()
           .setColor(0xef4444)
-          .setTitle("❌ Lỗi Trình Phát Nhạc")
-          .setDescription(`Không thể tải luồng phát: **${track?.title ?? "Unknown"}**\n\`${error?.message || "Lỗi nguồn phát"}\``),
+          .setDescription(`❌ Lỗi tải bài hát **${track?.title || "Không rõ"}**: \`${error?.message || "Tệp âm thanh bị lỗi"}\``),
       ],
     }).catch(() => null);
   }
 });
 
 /* =========================================================
-   6. SỰ KIỆN DISCORD BOT
+   4. SỰ KIỆN TIN NHẮN & ĐIỀU KHUYỂN
 ========================================================= */
 client.on(Events.ClientReady, () => {
   console.log(`🤖 Bot kết nối thành công: ${client.user.tag}`);
 });
 
 client.on(Events.MessageCreate, async (msg) => {
-  if (!msg.guildId || msg.author.bot) return;
-  if (!msg.content.startsWith("!")) return;
+  if (!msg.guildId || msg.author.bot || !msg.content.startsWith("!")) return;
 
   const args = msg.content.slice(1).trim().split(/\s+/);
   const command = args.shift().toLowerCase();
@@ -239,220 +120,195 @@ client.on(Events.MessageCreate, async (msg) => {
   const member = msg.member;
   const voiceChannel = member?.voice?.channel;
 
-  async function getPlayer() {
+  // Hàm tạo player tối ưu RAM cho máy chủ Render[span_9](start_span)[span_9](end_span)
+  async function getOrCreatePlayer() {
     const p = await manager.create(msg.guildId, {
-      lowPerformance: true,
-      preload: { enabled: true, autoDisableInLowPerformance: false },
-      crossfade: { enabled: false },
-      smartTransition: { enabled: false },
+      lowPerformance: true, // Auto disable crossfade và preload để tránh tràn RAM[span_10](start_span)[span_10](end_span)
       antiStuck: {
-        enabled: true,
-        maxRetries: 3,
-        retryDelayMs: 1000,
-        reduceQualityOnRetry: true,
+        enabled: true,[span_11](start_span)[span_11](end_span)
+        maxRetries: 3,[span_12](start_span)[span_12](end_span)
+        retryDelayMs: 1000,[span_13](start_span)[span_13](end_span)
       },
-      loudnessNormalization: { enabled: false },
     });
     p.textChannelId = msg.channelId;
     return p;
   }
 
-  /* =========================================================
-     🔒 BẢO VỆ QUYỀN: CHỈ NGƯỜI YÊU CẦU BÀI HÁT HOẶC MOD MỚI ĐƯỢC DÙNG
-  ========================================================= */
-  function checkPermission(player) {
-    const track = player?.currentTrack;
-    if (!track) return false;
-    const isRequester = track.requestedBy === msg.author.id;
+  // CHỨC NĂNG BẢO VỆ: CHỈ NGƯỜI PHÁT HOẶC MOD MỚI ĐƯỢC TÁC ĐỘNG
+  function hasPermission(player) {
+    const currentTrack = player?.currentTrack;
+    if (!currentTrack) return true;
+    
+    const isRequester = currentTrack.requestedBy === msg.author.id;
     const isMod = member.permissions.has(PermissionFlagsBits.ManageChannels);
     return isRequester || isMod;
   }
 
-  const reply = (embed) => msg.reply({ embeds: [embed] }).catch(() => null);
+  const reply = (content, isError = false) => {
+    const embed = new EmbedBuilder()
+      .setColor(isError ? 0xef4444 : 0x6366f1)
+      .setDescription(content);
+    return msg.reply({ embeds: [embed] }).catch(() => null);
+  };
 
   switch (command) {
     case "play":
     case "p": {
-      if (!voiceChannel) return reply(errEmbed("Bạn phải tham gia một kênh thoại trước!"));
-      if (!query) return reply(errEmbed("Vui lòng nhập tên bài hát hoặc đường link!"));
+      if (!voiceChannel) return reply("❌ Bạn phải vào một kênh thoại trước!", true);
+      if (!query) return reply("❌ Vui lòng nhập tên bài hát hoặc liên kết!", true);
 
-      const cleanedQuery = cleanQuery(query);
-      const player = await getPlayer();
-      if (!player.connection) await player.connect(voiceChannel);
+      const loadingMsg = await msg.reply("🔎 Đang tìm kiếm và xử lý bài hát...").catch(() => null);
+      const player = await getOrCreatePlayer();
 
-      const success = await player.play(cleanedQuery, msg.author.id).catch(() => false);
-      if (!success) return reply(errEmbed("Không tìm thấy kết quả hoặc không thể tải luồng phát nhạc."));
+      if (!player.connection) {
+        await player.connect(voiceChannel);
+      }
 
-      if (player.isPlaying && player.currentTrack?.requestedBy !== msg.author.id) {
-        return reply(
-          new EmbedBuilder()
-            .setColor(0x6366f1)
-            .setDescription(`📋 Đã thêm vào hàng đợi bài hát thành công!`)
-        );
+      const prevQueueSize = player.queueSize;
+      const wasPlaying = player.isPlaying;
+
+      const success = await player.play(query, msg.author.id).catch(() => false);
+
+      if (!success) {
+        if (loadingMsg) loadingMsg.delete().catch(() => null);
+        return reply("❌ Không thể lấy dữ liệu bài hát từ liên kết/từ khóa này!", true);
+      }
+
+      if (loadingMsg) loadingMsg.delete().catch(() => null);
+
+      if (wasPlaying) {
+        reply(`➕ Đã thêm bài hát mới vào hàng đợi (vị trí số **${prevQueueSize + 1}**)!`);
+      } else {
+        reply(`▶️ Đã bắt đầu phát bài hát theo yêu cầu của bạn!`);
       }
       break;
     }
 
-    case "pause": {
+    case "stop": {
       const player = manager.get(msg.guildId);
-      if (!player?.isPlaying) return reply(errEmbed("Hiện không có bài hát nào đang phát!"));
-      if (!checkPermission(player)) return reply(errEmbed("Bạn không có quyền tạm dừng bài hát này!"));
+      if (!player?.isPlaying) return reply("❌ Hiện không có bài hát nào đang phát!", true);
+      if (!hasPermission(player)) return reply("⛔ Chỉ **người yêu cầu bài hát hiện tại** hoặc **Quản trị viên** mới được dùng lệnh này!", true);
 
-      player.pause();
-      return reply(new EmbedBuilder().setColor(0xf59e0b).setDescription("⏸ Đã tạm dừng bài hát."));
-    }
-
-    case "resume":
-    case "r": {
-      const player = manager.get(msg.guildId);
-      if (!player?.isPaused) return reply(errEmbed("Nhạc hiện không ở trạng thái tạm dừng!"));
-      if (!checkPermission(player)) return reply(errEmbed("Bạn không có quyền phát tiếp bài hát này!"));
-
-      player.resume();
-      return reply(new EmbedBuilder().setColor(0x22c55e).setDescription("▶️ Đã tiếp tục phát nhạc."));
+      player.stop();[span_14](start_span)[span_14](end_span)
+      return reply("⏹ Đã dừng phát nhạc và xóa toàn bộ hàng đợi!");
     }
 
     case "skip":
     case "s": {
       const player = manager.get(msg.guildId);
-      if (!player?.isPlaying) return reply(errEmbed("Không có bài hát nào đang phát!"));
-      if (!checkPermission(player)) return reply(errEmbed("Bạn không có quyền bỏ qua bài hát này!"));
+      if (!player?.isPlaying) return reply("❌ Hiện không có bài hát nào đang phát!", true);
+      if (!hasPermission(player)) return reply("⛔ Chỉ **người yêu cầu bài hát hiện tại** hoặc **Quản trị viên** mới được bỏ qua bài hát!", true);
 
-      player.skip();
-      return reply(new EmbedBuilder().setColor(0x22c55e).setDescription("⏭ Đã bỏ qua bài hát hiện tại!"));
+      player.skip();[span_15](start_span)[span_15](end_span)
+      return reply("⏭ Đã chuyển sang bài hát tiếp theo!");
     }
 
-    case "stop": {
+    case "pause": {
       const player = manager.get(msg.guildId);
-      if (!player?.isPlaying) return reply(errEmbed("Không có nhạc đang phát!"));
-      if (!checkPermission(player)) return reply(errEmbed("Bạn không có quyền dừng trình phát nhạc!"));
+      if (!player?.isPlaying) return reply("❌ Không có bài hát nào đang phát để tạm dừng!", true);
+      if (!hasPermission(player)) return reply("⛔ Chỉ **người yêu cầu bài hát hiện tại** hoặc **Quản trị viên** mới được tạm dừng!", true);
 
-      player.stop();
-      return reply(new EmbedBuilder().setColor(0xef4444).setDescription("⏹ Đã dừng bài hát và xóa hàng đợi."));
+      player.pause();[span_16](start_span)[span_16](end_span)
+      return reply("⏸ Đã tạm dừng bài hát.");
+    }
+
+    case "resume":
+    case "r": {
+      const player = manager.get(msg.guildId);
+      if (!player?.isPaused) return reply("❌ Trình phát nhạc không ở trạng thái tạm dừng!", true);
+      if (!hasPermission(player)) return reply("⛔ Chỉ **người yêu cầu bài hát hiện tại** hoặc **Quản trị viên** mới được tiếp tục!", true);
+
+      player.resume();[span_17](start_span)[span_17](end_span)
+      return reply("▶️ Đã tiếp tục phát nhạc.");
     }
 
     case "seek": {
       const player = manager.get(msg.guildId);
-      if (!player?.currentTrack) return reply(errEmbed("Không có nhạc đang phát!"));
-      if (!checkPermission(player)) return reply(errEmbed("Bạn không có quyền tua nhạc!"));
+      if (!player?.currentTrack) return reply("❌ Không có bài hát nào đang phát!", true);
+      if (!hasPermission(player)) return reply("⛔ Chỉ **người yêu cầu bài hát hiện tại** hoặc **Quản trị viên** mới được tua bài hát!", true);
+
       const seconds = parseInt(query);
-      if (isNaN(seconds)) return reply(errEmbed("Cú pháp: `!seek <số_giây>` (Ví dụ: `!seek 60`)"));
+      if (isNaN(seconds)) return reply("❌ Vui lòng nhập số giây hợp lệ. Ví dụ: `!seek 60`", true);
 
-      await player.seek(seconds * 1000);
-      return reply(new EmbedBuilder().setColor(0x6366f1).setDescription(`⏩ Đã tua đến mốc **${seconds}s**`));
-    }
-
-    case "volume":
-    case "vol": {
-      const player = manager.get(msg.guildId);
-      if (!player) return reply(errEmbed("Trình phát nhạc chưa hoạt động."));
-      const vol = parseInt(query);
-      if (isNaN(vol) || vol < 0 || vol > 200) return reply(errEmbed("Âm lượng hỗ trợ từ 0 đến 200."));
-
-      player.setVolume(vol);
-      return reply(new EmbedBuilder().setColor(0x6366f1).setDescription(`🔊 Âm lượng đã chỉnh thành **${vol}%**`));
-    }
-
-    case "loop":
-    case "l": {
-      const player = manager.get(msg.guildId);
-      if (!player) return reply(errEmbed("Trình phát nhạc chưa hoạt động."));
-      const modes = ["off", "track", "queue"];
-      const mode = query.toLowerCase();
-      if (!modes.includes(mode)) return reply(errEmbed("Các chế độ lặp hợp lệ: `off`, `track`, `queue`"));
-
-      player.loop(mode);
-      return reply(new EmbedBuilder().setColor(0x8b5cf6).setDescription(`🔁 Chế độ lặp: **${mode}**`));
-    }
-
-    case "shuffle": {
-      const player = manager.get(msg.guildId);
-      if (!player) return reply(errEmbed("Trình phát nhạc chưa hoạt động."));
-
-      player.shuffle();
-      return reply(new EmbedBuilder().setColor(0x8b5cf6).setDescription("🔀 Đã xáo trộn danh sách phát!"));
+      await player.seek(seconds * 1000);[span_18](start_span)[span_18](end_span)
+      return reply(`⏩ Đã tua đến vị trí **${seconds}s**.`);
     }
 
     case "queue":
     case "q": {
       const player = manager.get(msg.guildId);
-      if (!player) return reply(errEmbed("Trình phát nhạc chưa hoạt động."));
+      if (!player) return reply("❌ Kênh thoại chưa bật trình phát nhạc!", true);
 
-      const current = player.currentTrack;
-      const upcoming = player.upcomingTracks.slice(0, 10);
-      if (!current && upcoming.length === 0) return reply(errEmbed("Hàng đợi phát nhạc hiện đang trống!"));
+      const current = player.currentTrack;[span_19](start_span)[span_19](end_span)
+      const upcoming = player.upcomingTracks.slice(0, 10);[span_20](start_span)[span_20](end_span)
 
-      const embed = new EmbedBuilder().setColor(0x6366f1).setTitle("🎵 Danh Sách Phát Nhạc");
+      if (!current && upcoming.length === 0) return reply("📋 Hàng đợi hiện tại đang trống!");
+
+      const embed = new EmbedBuilder().setColor(0x6366f1).setTitle("📋 Danh Sách Phát Nhạc");
       if (current) {
         embed.addFields({
           name: "▶️ Đang phát",
-          value: `**${current.title}** — ${formatDuration(current.duration)}`,
+          value: `**[${current.title}](${current.url})** - Yêu cầu bởi <@${current.requestedBy}>`,
         });
       }
       if (upcoming.length > 0) {
         embed.addFields({
-          name: "📋 Tiếp theo",
-          value: upcoming.map((t, i) => `\`${i + 1}.\` ${t.title} — ${formatDuration(t.duration)}`).join("\n"),
+          name: "⏭ Bài tiếp theo",
+          value: upcoming.map((t, i) => `\`${i + 1}.\` ${t.title}`).join("\n"),
         });
       }
-      embed.setFooter({ text: "Tổng cộng: " + player.queueSize + " bài hát trong hàng đợi" });
-      return reply(embed);
+      return msg.reply({ embeds: [embed] });
     }
 
     case "nowplaying":
     case "np": {
       const player = manager.get(msg.guildId);
-      if (!player?.currentTrack) return reply(errEmbed("Hiện không có bài hát nào đang phát!"));
+      if (!player?.currentTrack) return reply("❌ Không có nhạc đang phát!", true);
 
-      const track = player.currentTrack;
-      const bar = player.getProgressBar({
-        size: 18,
-        barChar: "▬",
-        progressChar: "🔘",
-        timeFormat: "compact",
-        showPercentage: true,
-      });
-      const time = player.getTime();
+      const track = player.currentTrack;[span_21](start_span)[span_21](end_span)
+      const progress = player.getProgressBar({ size: 15 });[span_22](start_span)[span_22](end_span)
+      const time = player.getTime();[span_23](start_span)[span_23](end_span)
 
       const embed = new EmbedBuilder()
         .setColor(0x6366f1)
-        .setTitle("🎵 Thông Tin Bài Hát Hiện Tại")
-        .setDescription(`**[${track.title}](${track.url})**`)
-        .setThumbnail(track.thumbnail ?? null)
-        .addFields(
-          { name: "Tiến trình", value: `\`${bar}\``, inline: false },
-          {
-            name: "Thời gian",
-            value: `${time.formatted.current} / ${track.isLive ? "🔴 Trực tiếp" : time.formatted.total}`,
-            inline: true,
-          },
-          { name: "Âm lượng", value: `${player.volume}%`, inline: true }
-        );
+        .setTitle("🎵 Bài Hát Đang Phát")
+        .setDescription(`**[${track.title}](${track.url})**\n\`${progress}\`\n⏱ ${time.formatted.current} / ${time.formatted.total}`)[span_24](start_span)[span_24](end_span)
+        .setThumbnail(track.thumbnail || null);
 
-      return reply(embed);
+      return msg.reply({ embeds: [embed] });
     }
 
-    case "help":
-    case "h": {
-      const embed = new EmbedBuilder()
-        .setColor(0x6366f1)
-        .setTitle("📖 DANH SÁCH LỆNH BOT NHẠC")
-        .addFields(
-          {
-            name: "▶️ Phát & Điều Khiển",
-            value: "`!play <tên/link>` hoặc `!p` • Phát nhạc từ YT/Spotify\n`!pause` • Tạm dừng phát\n`!resume` hoặc `!r` • Phát tiếp\n`!skip` hoặc `!s` • Bỏ qua bài hiện tại\n`!stop` • Dừng phát nhạc\n`!seek <giây>` • Tua nhạc",
-          },
-          {
-            name: "⚙️ Tùy Chỉnh & Hàng Đợi",
-            value: "`!queue` hoặc `!q` • Xem danh sách chờ\n`!nowplaying` hoặc `!np` • Xem tiến trình bài hát\n`!volume <0-200>` • Chỉnh âm lượng\n`!loop <off/track/queue>` • Chế độ lặp\n`!shuffle` • Trộn bài hát",
-          }
-        );
-      return reply(embed);
+    case "volume":
+    case "vol": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply("❌ Trình phát nhạc chưa khởi tạo!", true);
+
+      const vol = parseInt(query);
+      if (isNaN(vol) || vol < 0 || vol > 200) return reply("❌ Mức âm lượng từ 0 đến 200!", true);
+
+      player.setVolume(vol);[span_25](start_span)[span_25](end_span)
+      return reply(`🔊 Đã chỉnh âm lượng thành **${vol}%**`);
+    }
+
+    case "loop": {
+      const player = manager.get(msg.guildId);
+      if (!player) return reply("❌ Trình phát nhạc chưa khởi tạo!", true);
+
+      const mode = query.toLowerCase();
+      if (!["off", "track", "queue"].includes(mode)) return reply("❌ Các chế độ hợp lệ: `off`, `track`, `queue`", true);
+
+      player.loop(mode);[span_26](start_span)[span_26](end_span)
+      return reply(`🔁 Đã đổi chế độ lặp sang: **${mode}**`);
     }
   }
 });
 
-/* =========================================================
-   7. ĐĂNG NHẬP BOT
-========================================================= */
-client.login(token);
+function formatMs(ms) {
+  if (!ms) return "00:00";
+  const sec = Math.floor((ms / 1000) % 60);
+  const min = Math.floor((ms / (1000 * 60)) % 60);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(min)}:${pad(sec)}`;
+}
+
+client.login(process.env.DISCORD_TOKEN);[span_27](start_span)[span_27](end_span)
