@@ -11,22 +11,18 @@ import { PlayerManager } from "ziplayer";
 import { YouTubePlugin, SpotifyPlugin } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
 
-/* =========================================================
-   1. KHỞI TẠO HTTP SERVER ĐỂ RENDER FREE KHÔNG BỊ KILL
-========================================================= */
+// 1. Khởi tạo HTTP Server tránh Render ngắt kết nối Web Service
 const PORT = process.env.PORT || 10000;
 http
   .createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("ZiPlayer Bot is running!");
+    res.end("ZiPlayer Bot is online!");
   })
   .listen(PORT, "0.0.0.0", () => {
     console.log(`🌐 Web server đang chạy ở cổng ${PORT}`);
   });
 
-/* =========================================================
-   2. KHỞI TẠO CLIENT VÀ PLAYER MANAGER
-========================================================= */
+// 2. Cấu hình Discord Client & ZiPlayer Manager
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -51,9 +47,7 @@ const manager = new PlayerManager({
   enableSearchCache: true,
 });
 
-/* =========================================================
-   3. CÁC SỰ KIỆN TRÌNH PHÁT NHẠC
-========================================================= */
+// 3. Xử lý các sự kiện âm thanh
 manager.on("trackStart", async (player, track) => {
   const channel = client.channels.cache.get(player.textChannelId);
   if (!channel) return;
@@ -103,9 +97,7 @@ manager.on("playerError", async (player, error, track) => {
   }
 });
 
-/* =========================================================
-   4. CÁC LỆNH ĐIỀU KHUYỂN
-========================================================= */
+// 4. Lệnh điều khiển Bot
 client.on(Events.ClientReady, () => {
   console.log(`🤖 Bot kết nối thành công: ${client.user.tag}`);
 });
@@ -132,7 +124,7 @@ client.on(Events.MessageCreate, async (msg) => {
     return p;
   }
 
-  // BẢO VỆ QỦYỀN: CHỈ NGƯỜI PHÁT HOẶC QUẢN TRỊ VIÊN MỚI ĐƯỢC TÁC ĐỘNG
+  // Kiểm tra quyền: Chỉ người mở bài hoặc Quản trị viên channel mới được tác động
   function hasPermission(player) {
     const currentTrack = player?.currentTrack;
     if (!currentTrack) return true;
