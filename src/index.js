@@ -27,9 +27,15 @@ const client = new Client({
 	],
 });
 
-const player = new PlayerManager({
-	plugins: [new SoundCloudPlugin(), new YouTubePlugin(), new SpotifyPlugin()],
+// === CHỈ SỬA ĐÚNG ĐOẠN NÀY ===
+const soundcloudPlugin = new SoundCloudPlugin({
+	clientId: process.env.SOUNDCLOUD_CLIENT_ID || "KKzJxmw11tYpCs6T24P4uUYhqmjalG6M"
 });
+
+const player = new PlayerManager({
+	plugins: [soundcloudPlugin, new YouTubePlugin(), new SpotifyPlugin()],
+});
+// =============================
 
 // Trình lắng nghe sự kiện của Player
 player.on("trackStart", (queue, track) => {
