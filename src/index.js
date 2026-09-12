@@ -110,13 +110,13 @@ client.on("messageCreate", async (message) => {
 		);
 	}
 
-	// === CHỈ FIX CHỖ LỆNH PLAY BỊ TREO KHÔNG TRẢ LỜI TẠI ĐÂY ===
+	// === FIX LỖI TIN NHẮN BỊ XÓA & KHÔNG PHÁT ĐƯỢC LINK SCL ===
 	if (command === "play" || command === "p") {
 		if (!args[0]) return message.channel.send("❌ | Vui lòng nhập tên bài hát hoặc đường link!");
 		if (!message.member.voice.channel) return message.channel.send("❌ | Bạn phải tham gia một kênh thoại trước!");
 
-		// Gửi tin nhắn ngay lập tức để xác nhận bot đã nhận lệnh
-		const statusMsg = await message.channel.send(`🔍 **Đang tìm kiếm bài hát:** \`${args.join(" ")}\`...`);
+		const searchQuery = args.join(" ");
+		const statusMsg = await message.channel.send(`🔍 **Đang tìm kiếm bài hát:** \`${searchQuery}\`...`);
 
 		try {
 			const queue = await player.create(message.guild.id, {
@@ -130,17 +130,17 @@ client.on("messageCreate", async (message) => {
 				await queue.connect(message.member.voice.channel);
 			}
 
-			// Chạy phát nhạc ngầm tránh treo luồng tin nhắn
-			queue.play(args.join(" ")).then((track) => {
-				if (statusMsg.deletable) statusMsg.delete().catch(() => {});
-			}).catch((e) => {
+			// Chạy phát nhạc ngầm (không xóa tin nhắn sau khi thành công)
+			queue.play(searchQuery).then((track) => {
+				statusMsg.edit(`🔎 **Đã tải xong:** \`${searchQuery}\``).catch(() => {});
+			}).catch(async (e) => {
 				console.error("Play error:", e);
-				statusMsg.edit("❌ | Không tìm thấy hoặc không thể phát nhạc từ bài hát này.");
+				statusMsg.edit("❌ | Không tìm thấy hoặc không thể phát nhạc từ bài hát này.").catch(() => {});
 			});
 
 		} catch (e) {
 			console.error("Connect error:", e);
-			return statusMsg.edit("❌ | Bot không thể vào kênh thoại của bạn.");
+			return statusMsg.edit("❌ | Bot không thể vào kênh thoại của bạn.").catch(() => {});
 		}
 		return;
 	}
