@@ -27,8 +27,7 @@ const client = new Client({
 	],
 });
 
-// === CHỈ SỬA ĐOẠN NÀY ===
-// Sử dụng Client ID SoundCloud hợp lệ hoặc lấy từ biến môi trường để tránh lỗi tự động quét key bị chặn
+// === CHỈ SỬA ĐOẠN NÀY ĐỂ FIX LỖI SOUNDCLOUD ===
 const scClientId = process.env.SOUNDCLOUD_CLIENT_ID || process.env.SOUNDCLOUD_CLIENTID || "KKzJxmw11tYpCs6T24P4uUYhqmjalG6M";
 
 let soundcloudPlugin = null;
@@ -37,6 +36,10 @@ try {
 		clientId: scClientId,
 		client_id: scClientId,
 	});
+	// Ghi đè hàm init để tránh việc plugin tự động cào key bị SoundCloud/Render chặn văng lỗi
+	soundcloudPlugin.init = async function () {
+		return true;
+	};
 } catch (err) {
 	console.warn("[SoundCloud] Khởi tạo SoundCloudPlugin thất bại:", err && err.message ? err.message : err);
 }
@@ -56,7 +59,7 @@ try {
 	console.error("[PlayerManager] failed to initialize:", err && err.stack ? err.stack : err);
 	throw err;
 }
-// =============================
+// ===============================================
 
 // === CHỈ THÊM/SỬA PHẦN TRẢ LỜI KHI PHÁT NHẠC TẠI ĐÂY ===
 player.on("trackStart", (queue, track) => {
