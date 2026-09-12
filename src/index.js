@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const { PlayerManager } = require("ziplayer");
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
-const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin } = require("@ziplayer/plugin");
+const { YouTubePlugin, SpotifyPlugin } = require("@ziplayer/plugin");
 
 // 1. Web Server Keep-Alive giúp Render luôn online
 const app = express();
@@ -27,25 +27,8 @@ const client = new Client({
 	],
 });
 
-// === CHỈ SỬA ĐOẠN NÀY ĐỂ FIX LỖI SOUNDCLOUD ===
-const scClientId = process.env.SOUNDCLOUD_CLIENT_ID || process.env.SOUNDCLOUD_CLIENTID || "KKzJxmw11tYpCs6T24P4uUYhqmjalG6M";
-
-let soundcloudPlugin = null;
-try {
-	soundcloudPlugin = new SoundCloudPlugin({
-		clientId: scClientId,
-		client_id: scClientId,
-	});
-	// Ghi đè hàm init để tránh việc plugin tự động cào key bị SoundCloud/Render chặn văng lỗi
-	soundcloudPlugin.init = async function () {
-		return true;
-	};
-} catch (err) {
-	console.warn("[SoundCloud] Khởi tạo SoundCloudPlugin thất bại:", err && err.message ? err.message : err);
-}
-
+// === FIX LỖI SOUNDCLOUD: BỎ PLUGIN SOUNDCLOUD TRỰC TIẾP ĐỂ TRÁNH CRASH IP RENDER ===
 const plugins = [
-	...(soundcloudPlugin ? [soundcloudPlugin] : []),
 	new YouTubePlugin(),
 	new SpotifyPlugin(),
 ];
@@ -59,7 +42,7 @@ try {
 	console.error("[PlayerManager] failed to initialize:", err && err.stack ? err.stack : err);
 	throw err;
 }
-// ===============================================
+// ====================================================================================
 
 // === CHỈ THÊM/SỬA PHẦN TRẢ LỜI KHI PHÁT NHẠC TẠI ĐÂY ===
 player.on("trackStart", (queue, track) => {
