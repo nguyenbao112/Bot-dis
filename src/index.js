@@ -27,7 +27,6 @@ const client = new Client({
 	],
 });
 
-// === FIX LỖI SOUNDCLOUD: BỎ PLUGIN SOUNDCLOUD TRỰC TIẾP ĐỂ TRÁNH CRASH IP RENDER ===
 const plugins = [
 	new YouTubePlugin(),
 	new SpotifyPlugin(),
@@ -42,9 +41,8 @@ try {
 	console.error("[PlayerManager] failed to initialize:", err && err.stack ? err.stack : err);
 	throw err;
 }
-// ====================================================================================
 
-// === CHỈ THÊM/SỬA PHẦN TRẢ LỜI KHI PHÁT NHẠC TẠI ĐÂY ===
+// === TRẢ LỜI KHI PHÁT NHẠC ===
 player.on("trackStart", (queue, track) => {
 	if (queue.userdata?.channel) {
 		const embed = new EmbedBuilder()
@@ -69,7 +67,6 @@ player.on("trackAdd", (queue, track) => {
 		queue.userdata.channel.send(`✅ **Đã thêm vào hàng đợi:** **${track.title}**`);
 	}
 });
-// ====================================================
 
 player.on("error", (queue, error) => {
 	console.log(`[${queue.guild.id}] Error emitted from the queue: ${error}`);
@@ -100,7 +97,7 @@ client.on("messageCreate", async (message) => {
 	if (command === "help" || command === "h") {
 		return message.channel.send(
 			"📜 **DANH SÁCH LỆNH BOT NHẠC**\n\n" +
-			"🎵 `!play <tên bài/URL>` (hoặc `!p`): Phát nhạc từ YouTube, Spotify, SoundCloud\n" +
+			"🎵 `!play <tên bài/URL>` (hoặc `!p`): Phát nhạc từ YouTube, Spotify\n" +
 			"⏭ `!skip` (hoặc `!s`): Bỏ qua bài hát hiện tại\n" +
 			"⏸ `!pause`: Tạm dừng phát nhạc\n" +
 			"▶ `!resume` (hoặc `!r`): Tiếp tục phát nhạc\n" +
@@ -113,31 +110,41 @@ client.on("messageCreate", async (message) => {
 		);
 	}
 
+	// === CHỈ FIX CHỖ LỆNH PLAY BỊ TREO KHÔNG TRẢ LỜI TẠI ĐÂY ===
 	if (command === "play" || command === "p") {
 		if (!args[0]) return message.channel.send("❌ | Vui lòng nhập tên bài hát hoặc đường link!");
 		if (!message.member.voice.channel) return message.channel.send("❌ | Bạn phải tham gia một kênh thoại trước!");
 
-		const queue = await player.create(message.guild.id, {
-			userdata: {
-				channel: message.channel,
-			},
-			selfDeaf: true,
-		});
+		// Gửi tin nhắn ngay lập tức để xác nhận bot đã nhận lệnh
+		const statusMsg = await message.channel.send(`🔍 **Đang tìm kiếm bài hát:** \`${args.join(" ")}\`...`);
 
 		try {
-			if (!queue.connection) await queue.connect(message.member.voice.channel);
-			const success = await queue.play(args.join(" ")).catch((e) => {
-				console.log("Play error:", e && e.stack ? e.stack : e);
-				return message.channel.send("❌ | Không tìm thấy kết quả phù hợp");
+			const queue = await player.create(message.guild.id, {
+				userdata: {
+					channel: message.channel,
+				},
+				selfDeaf: true,
 			});
 
-			if (success) message.channel.send(`🔍 **Đã tìm kiếm:** \`${args.join(" ")}\``);
+			if (!queue.connection) {
+				await queue.connect(message.member.voice.channel);
+			}
+
+			// Chạy phát nhạc ngầm tránh treo luồng tin nhắn
+			queue.play(args.join(" ")).then((track) => {
+				if (statusMsg.deletable) statusMsg.delete().catch(() => {});
+			}).catch((e) => {
+				console.error("Play error:", e);
+				statusMsg.edit("❌ | Không tìm thấy hoặc không thể phát nhạc từ bài hát này.");
+			});
+
 		} catch (e) {
-			console.log("Connect error:", e && e.stack ? e.stack : e);
-			return message.channel.send("❌ | Bot không thể vào kênh thoại của bạn");
+			console.error("Connect error:", e);
+			return statusMsg.edit("❌ | Bot không thể vào kênh thoại của bạn.");
 		}
 		return;
 	}
+	// ============================================================
 
 	const queue = player.get(message.guild.id);
 	if (!queue || !queue.isPlaying) return message.channel.send("❌ | Hiện tại không có nhạc đang phát");
