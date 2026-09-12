@@ -2,8 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const { PlayerManager } = require("ziplayer");
 const { Client, GatewayIntentBits } = require("discord.js");
-// Note: do NOT import SoundCloudPlugin statically to avoid @zibot/scdl init when no key is present
-const { YouTubePlugin, SpotifyPlugin } = require("@ziplayer/plugin");
+const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin } = require("@ziplayer/plugin");
 
 // 1. Web Server Keep-Alive giúp Render luôn online
 const app = express();
@@ -29,146 +28,17 @@ const client = new Client({
 });
 
 // === CHỈ SỬA ĐOẠN NÀY ===
-// SoundCloudKeyManager: probe SoundCloud for client_id and auto-refresh periodically.
-// It will not force-recreate the player manager automatically (to avoid disrupting playback),
-// but it will keep the in-memory client id up-to-date and log when a new id is found.
-class SoundCloudKeyManager {
-	constructor({ refreshIntervalMs = 6 * 60 * 60 * 1000, userAgent = null } = {}) {
-		this.clientId = null;
-		this.refreshIntervalMs = refreshIntervalMs;
-		this.timer = null;
-		this.userAgent = userAgent ||
-			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-		this.fetchOptions = {
-			headers: {
-				"User-Agent": this.userAgent,
-				Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-				Referer: "https://soundcloud.com/",
-			},
-		};
-		this.running = false;
-	}
-
-	async _fetchText(url) {
-		if (typeof globalThis.fetch !== "function") {
-			// fetch not available in this runtime
-			throw new Error("fetch is not available in this Node runtime");
-		}
-		const resp = await fetch(url, this.fetchOptions);
-		if (!resp.ok) throw new Error(`Fetch failed ${url} status ${resp.status}`);
-		return await resp.text();
-	}
-
-	async probeForClientId() {
-		// Try homepage first
-		const homepage = await this._fetchText("https://soundcloud.com/");
-
-		// Common patterns
-		const reClient = /client_id["']?\s*[:=]\s*["']([a-zA-Z0-9_\-]{20,})["']/g;
-		let m;
-		while ((m = reClient.exec(homepage)) !== null) {
-			if (m[1]) return m[1];
-		}
-
-		// Find scripts to probe
-		const scriptRe = /<script[^>]+src=["']([^"']+)["']/g;
-		const scriptUrls = [];
-		let s;
-		while ((s = scriptRe.exec(homepage)) !== null) {
-			let src = s[1];
-			if (src.startsWith("//")) src = "https:" + src;
-			else if (src.startsWith("/")) src = "https://soundcloud.com" + src;
-			if (src.startsWith("http")) scriptUrls.push(src);
-		}
-
-		for (const u of scriptUrls.slice(0, 8)) {
-			try {
-				const js = await this._fetchText(u);
-				const m2 = /client_id["']?\s*[:=]\s*["']([a-zA-Z0-9_\-]{20,})["']/.exec(js);
-				if (m2 && m2[1]) return m2[1];
-			} catch (err) {
-				// ignore script fetch errors
-			}
-		}
-
-		// Not found
-		return null;
-	}
-
-	async refreshOnce() {
-		try {
-			const id = await this.probeForClientId();
-			if (id && typeof id === "string" && id.length > 8) {
-				if (this.clientId && this.clientId !== id) {
-					console.log("[SoundCloudKeyManager] client_id rotated (prefix):", id.slice(0, 6) + "...");
-				} else if (!this.clientId) {
-					console.log("[SoundCloudKeyManager] client_id discovered (prefix):", id.slice(0, 6) + "...");
-				}
-				this.clientId = id;
-				return true;
-			}
-			console.warn("[SoundCloudKeyManager] client_id not found during probe");
-			return false;
-		} catch (err) {
-			console.warn("[SoundCloudKeyManager] probe failed:", err && err.message ? err.message : err);
-			return false;
-		}
-	}
-
-	startBackground() {
-		if (this.running) return;
-		this.running = true;
-		// initial immediate probe (non-blocking)
-		this.refreshOnce();
-		this.timer = setInterval(() => {
-			this.refreshOnce();
-		}, this.refreshIntervalMs);
-	}
-
-	stop() {
-		if (this.timer) clearInterval(this.timer);
-		this.running = false;
-	}
-
-	getClientId() {
-		return this.clientId;
-	}
-}
-
-// priority: environment variable > discovered key
-const envSoundcloudClientId = process.env.SOUNDCLOUD_CLIENT_ID || process.env.SOUNDCLOUD_CLIENTID || null;
-const scKeyManager = new SoundCloudKeyManager({ refreshIntervalMs: 6 * 60 * 60 * 1000 });
-if (!envSoundcloudClientId) {
-	// start background discovery if env not provided
-	scKeyManager.startBackground();
-} else {
-	// still start background to auto-refresh if env provided
-	scKeyManager.clientId = envSoundcloudClientId;
-	scKeyManager.startBackground();
-}
-
-// Use the env value if present, otherwise fallback to whatever discovery returned so far
-let initialSoundcloudClientId = envSoundcloudClientId || scKeyManager.getClientId() || null;
+// Sử dụng Client ID SoundCloud hợp lệ hoặc lấy từ biến môi trường để tránh lỗi tự động quét key bị chặn
+const scClientId = process.env.SOUNDCLOUD_CLIENT_ID || process.env.SOUNDCLOUD_CLIENTID || "KKzJxmw11tYpCs6T24P4uUYhqmjalG6M";
 
 let soundcloudPlugin = null;
-if (initialSoundcloudClientId) {
-	// Dynamic import to avoid module top-level init when no key
-	try {
-		const pluginModule = require("@ziplayer/plugin");
-		if (pluginModule && pluginModule.SoundCloudPlugin) {
-			soundcloudPlugin = new pluginModule.SoundCloudPlugin({
-				client_id: initialSoundcloudClientId,
-				clientId: initialSoundcloudClientId,
-			});
-		} else {
-			console.warn("[SoundCloud] SoundCloudPlugin not found in @ziplayer/plugin");
-		}
-	} catch (err) {
-		console.warn("[SoundCloud] dynamic require failed (delayed init):", err && err.message ? err.message : err);
-		// Do not crash; plugin will remain null and discovery will continue in background
-	}
-} else {
-	console.log("[SoundCloud] No client_id available at startup — SoundCloud plugin disabled. Discovery running in background.");
+try {
+	soundcloudPlugin = new SoundCloudPlugin({
+		clientId: scClientId,
+		client_id: scClientId,
+	});
+} catch (err) {
+	console.warn("[SoundCloud] Khởi tạo SoundCloudPlugin thất bại:", err && err.message ? err.message : err);
 }
 
 const plugins = [
