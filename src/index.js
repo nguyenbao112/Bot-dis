@@ -3,8 +3,7 @@ const express = require("express");
 const { PlayerManager } = require("ziplayer");
 const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const { YouTubePlugin, SpotifyPlugin } = require("@ziplayer/plugin");
-const scdl = require("soundcloud-downloader").default;
-const scKeyFetch = require("soundcloud-key-fetch");
+const play = require("play-dl");
 
 // 1. Web Server Keep-Alive
 const app = express();
@@ -17,22 +16,6 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
 	console.log(`Web server đang chạy ở cổng ${PORT}`);
 });
-
-// Biến lưu Client ID tự động
-let autoSoundCloudClientId = null;
-
-// Hàm tự động lấy SoundCloud Client ID mà không cần làm thủ công
-async function refreshSoundCloudClientId() {
-	try {
-		const key = await scKeyFetch.fetchKey();
-		if (key) {
-			autoSoundCloudClientId = key;
-			console.log("[SoundCloud] Đã lấy Client ID tự động thành công:", key);
-		}
-	} catch (err) {
-		console.error("[SoundCloud] Không thể tự lấy Client ID từ SoundCloud:", err.message);
-	}
-}
 
 // 2. Cấu hình Discord Bot & ZiPlayer
 const prefix = "!";
@@ -88,10 +71,8 @@ player.on("error", (queue, error) => {
 	console.log(`[${queue.guild.id}] Error emitted from the queue: ${error}`);
 });
 
-client.on("clientReady", async () => {
+client.on("clientReady", () => {
 	console.log(`Logged in as ${client.user.tag}`);
-	// Tự động lấy key khi bot vừa đăng nhập thành công
-	await refreshSoundCloudClientId();
 });
 
 // 3. Xử lý Lệnh
@@ -107,19 +88,9 @@ client.on("messageCreate", async (message) => {
 		if (!message.member.voice.channel) return message.channel.send("❌ | Bạn phải tham gia một kênh thoại trước!");
 
 		let inputUrl = args.join(" ");
-		const statusMsg = await message.channel.send(`🔍 **Đang xử lý nguồn SoundCloud:** \`${inputUrl}\`...`);
+		const statusMsg = await message.channel.send(`🔍 **Đang xử lý nguồn SoundCloud...**`);
 
 		try {
-			// Giải mã link rút gọn on.soundcloud.com nếu có
-			if (inputUrl.includes("on.soundcloud.com")) {
-				try {
-					const res = await fetch(inputUrl, { redirect: "follow" });
-					inputUrl = res.url;
-				} catch (e) {
-					console.error("Lỗi giải mã link SoundCloud rút gọn:", e);
-				}
-			}
-
 			const queue = await player.create(message.guild.id, {
 				userdata: { channel: message.channel },
 				selfDeaf: true,
@@ -131,37 +102,27 @@ client.on("messageCreate", async (message) => {
 
 			// Nếu phát link SoundCloud
 			if (inputUrl.includes("soundcloud.com")) {
-				// Nếu chưa có key hoặc key cũ bị lỗi, thử lấy lại tự động
-				if (!autoSoundCloudClientId) {
-					await refreshSoundCloudClientId();
+				// Kiểm tra tính hợp lệ của link SoundCloud
+				const sclValidation = await play.so_validate(inputUrl);
+				if (!sclValidation) {
+					return statusMsg.edit("❌ | Đường dẫn SoundCloud không hợp lệ.").catch(() => {});
 				}
 
-				const clientID = autoSoundCloudClientId || process.env.SOUNDCLOUD_CLIENT_ID;
+				// Lấy thông tin chi tiết bài hát
+				const info = await play.soundcloud(inputUrl);
+				// Tạo luồng phát chuẩn cho Discord
+				const streamData = await play.stream(inputUrl);
 
-				// Lấy thông tin bài hát trực tiếp qua SCDL với Client ID tự lấy
-				const info = await scdl.getInfo(inputUrl, clientID).catch(async (err) => {
-					console.error("SCDL Error, retry fetching key...", err);
-					// Thử lấy lại key 1 lần nữa nếu key cũ hỏng
-					await refreshSoundCloudClientId();
-					return await scdl.getInfo(inputUrl, autoSoundCloudClientId).catch(() => null);
-				});
-
-				if (!info) {
-					return statusMsg.edit("❌ | Không thể lấy dữ liệu từ SoundCloud. SoundCloud hiện đang chặn IP của Render.").catch(() => {});
-				}
-
-				// Lấy luồng phát audio
-				const stream = await scdl.download(inputUrl, clientID);
-
-				await queue.play(stream, {
-					title: info.title || "SoundCloud Track",
-					author: info.user?.username || "SoundCloud",
+				await queue.play(streamData.stream, {
+					type: streamData.type,
+					title: info.name || "SoundCloud Track",
+					author: info.user?.name || "SoundCloud",
 					url: inputUrl,
-					thumbnail: info.artwork_url || null,
-					duration: info.duration ? Math.floor(info.duration / 1000) : 0,
+					thumbnail: info.thumbnail || null,
+					duration: info.durationInSec || 0,
 				});
 
-				statusMsg.edit(`🔎 **Đã tải phát trực tiếp từ SoundCloud:** \`${info.title}\``).catch(() => {});
+				statusMsg.edit(`🔎 **Đã tải phát trực tiếp từ SoundCloud:** \`${info.name}\``).catch(() => {});
 			} else {
 				// Phát qua YouTube/Spotify mặc định nếu không phải link SoundCloud
 				const track = await queue.play(inputUrl);
@@ -171,7 +132,7 @@ client.on("messageCreate", async (message) => {
 
 		} catch (e) {
 			console.error("Play error:", e);
-			return statusMsg.edit("❌ | Lỗi phát nhạc từ SoundCloud.").catch(() => {});
+			return statusMsg.edit("❌ | Lỗi phát nhạc từ SoundCloud. SoundCloud chặn IP hoặc bài viết riêng tư.").catch(() => {});
 		}
 		return;
 	}
