@@ -83,6 +83,23 @@ client.on("messageCreate", async (message) => {
 	const args = message.content.slice(prefix.length).trim().split(/ +/g);
 	const command = args.shift().toLowerCase();
 
+	// === LỆNH TRỢ GIÚP (HELP) ===
+	if (command === "help" || command === "h") {
+		return message.channel.send(
+			"📜 **DANH SÁCH LỆNH BOT NHẠC**\n\n" +
+			"🎵 `!play <tên bài/URL>` (hoặc `!p`): Phát nhạc từ YouTube, Spotify, SoundCloud\n" +
+			"⏭ `!skip` (hoặc `!s`): Bỏ qua bài hát hiện tại\n" +
+			"⏸ `!pause`: Tạm dừng phát nhạc\n" +
+			"▶ `!resume` (hoặc `!r`): Tiếp tục phát nhạc\n" +
+			"⏹ `!stop`: Dừng phát nhạc và xóa hàng đợi\n" +
+			"📜 `!queue` (hoặc `!q`): Xem danh sách bài hát trong hàng đợi\n" +
+			"🔊 `!volume <0-100>` (hoặc `!vol`): Điều chỉnh âm lượng\n" +
+			"🔁 `!autoplay`: Bật/Tắt chế độ tự động phát bài tiếp theo\n" +
+			"🎧 `!nowplaying` (hoặc `!np`): Xem thông tin bài hát đang phát\n" +
+			"👋 `!leave`: Ngắt kết nối bot khỏi kênh thoại"
+		);
+	}
+
 	if (command === "play" || command === "p") {
 		if (!args[0]) return message.channel.send("❌ | Vui lòng nhập tên bài hát hoặc đường link!");
 		if (!message.member.voice.channel) return message.channel.send("❌ | Bạn phải tham gia một kênh thoại trước!");
@@ -91,6 +108,16 @@ client.on("messageCreate", async (message) => {
 		const statusMsg = await message.channel.send(`🔍 **Đang xử lý nguồn SoundCloud...**`);
 
 		try {
+			// Giải mã link rút gọn on.soundcloud.com nếu có
+			if (inputUrl.includes("on.soundcloud.com")) {
+				try {
+					const response = await fetch(inputUrl, { method: "HEAD", redirect: "follow" });
+					inputUrl = response.url;
+				} catch (err) {
+					console.error("Lỗi giải mã link rút gọn SoundCloud:", err);
+				}
+			}
+
 			const queue = await player.create(message.guild.id, {
 				userdata: { channel: message.channel },
 				selfDeaf: true,
@@ -102,15 +129,15 @@ client.on("messageCreate", async (message) => {
 
 			// Nếu phát link SoundCloud
 			if (inputUrl.includes("soundcloud.com")) {
-				// Kiểm tra tính hợp lệ của link SoundCloud
-				const sclValidation = await play.so_validate(inputUrl);
-				if (!sclValidation) {
-					return statusMsg.edit("❌ | Đường dẫn SoundCloud không hợp lệ.").catch(() => {});
+				const info = await play.soundcloud(inputUrl).catch((e) => {
+					console.error("SoundCloud Fetch Error:", e);
+					return null;
+				});
+
+				if (!info) {
+					return statusMsg.edit("❌ | Không thể tải bài hát từ link SoundCloud này.").catch(() => {});
 				}
 
-				// Lấy thông tin chi tiết bài hát
-				const info = await play.soundcloud(inputUrl);
-				// Tạo luồng phát chuẩn cho Discord
 				const streamData = await play.stream(inputUrl);
 
 				await queue.play(streamData.stream, {
@@ -143,15 +170,42 @@ client.on("messageCreate", async (message) => {
 	if (command === "skip" || command === "s") {
 		queue.skip();
 		message.channel.send("⏭ | Đã bỏ qua bài hát hiện tại");
+	} else if (command === "autoplay") {
+		queue.queue.autoPlay(!queue.queue.autoPlay());
+		message.channel.send(`🔁 | Chế độ Tự động phát hiện là: **${queue.queue.autoPlay() ? "Bật" : "Tắt"}**`);
 	} else if (command === "stop") {
 		queue.stop();
 		message.channel.send("⏹ | Đã dừng phát nhạc và xóa danh sách chờ");
 	} else if (command === "pause") {
+		if (queue.isPaused) return message.channel.send("❌ | Nhạc đã tạm dừng rồi");
 		queue.pause();
 		message.channel.send("⏸ | Đã tạm dừng phát nhạc");
 	} else if (command === "resume" || command === "r") {
+		if (!queue.isPaused) return message.channel.send("❌ | Nhạc vẫn đang phát bình thường");
 		queue.resume();
 		message.channel.send("▶ | Tiếp tục phát nhạc");
+	} else if (command === "queue" || command === "q") {
+		const current = queue.currentTrack;
+		const list = queue.upcomingTracks
+			.map((t, i) => `${i + 1}. ${t.title} - ${t.requestedBy}`)
+			.slice(0, 10)
+			.join("\n");
+		message.channel.send(
+			`**Bài hát đang phát:**\n${current ? `${current.title} - ${current.requestedBy}` : "Không có"}\n\n**Danh sách chờ:**\n${
+				list.length > 0 ? list : "Không có bài hát nào trong hàng đợi"
+			}`
+		);
+	} else if (command === "volume" || command === "vol") {
+		if (!args[0]) return message.channel.send(`🔊 | Âm lượng hiện tại: **${queue.volume}**`);
+		const volume = parseInt(args[0]);
+		if (isNaN(volume) || volume < 0 || volume > 100)
+			return message.channel.send("❌ | Âm lượng phải là một số từ 0 đến 100");
+		queue.setVolume(volume);
+		message.channel.send(`🔊 | Đã chỉnh âm lượng thành: **${volume}**`);
+	} else if (command === "nowplaying" || command === "np") {
+		const current = queue.currentTrack;
+		const progress = queue.getProgressBar();
+		message.channel.send(`▶ | Đang phát: **${current ? current.title : "Không rõ"}**\n${progress}`);
 	} else if (command === "leave") {
 		queue.destroy();
 		message.channel.send("👋 | Đã rời khỏi kênh thoại");
