@@ -1,218 +1,354 @@
-require("dotenv").config();
-const express = require("express");
-const { PlayerManager } = require("ziplayer");
-const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
-const { YouTubePlugin, SpotifyPlugin } = require("@ziplayer/plugin");
-const play = require("play-dl");
+import "dotenv/config";
+import http from "http";
+import {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  PermissionFlagsBits,
+  Events,
+} from "discord.js";
+import { PlayerManager } from "ziplayer";
+import {
+  YouTubePlugin,
+  SpotifyPlugin,
+  TTSPlugin,
+} from "@ziplayer/plugin";
+import { InfinityPlugin } from "@ziplayer/infinity";
 
-// 1. Web Server Keep-Alive
-const app = express();
-const PORT = process.env.PORT || 3000;
+/* =========================================================
+   CONFIG
+========================================================= */
 
-app.get("/", (req, res) => {
-	res.send("Bot đang chạy 24/7!");
-});
+const TOKEN = process.env.DISCORD_TOKEN || process.env.TOKEN;
 
-app.listen(PORT, () => {
-	console.log(`Web server đang chạy ở cổng ${PORT}`);
-});
-
-// 2. Cấu hình Discord Bot & ZiPlayer
-const prefix = "!";
-const client = new Client({
-	intents: [
-		GatewayIntentBits.Guilds,
-		GatewayIntentBits.GuildMessages,
-		GatewayIntentBits.GuildVoiceStates,
-		GatewayIntentBits.MessageContent,
-	],
-});
-
-const plugins = [
-	new YouTubePlugin(),
-	new SpotifyPlugin(),
-];
-
-let player;
-try {
-	player = new PlayerManager({ plugins });
-} catch (err) {
-	console.error("[PlayerManager] failed to initialize:", err && err.stack ? err.stack : err);
-	throw err;
+if (!TOKEN) {
+  console.error("❌ Không tìm thấy DISCORD_TOKEN hoặc TOKEN trong .env");
+  process.exit(1);
 }
 
-// === EVENT TRẢ LỜI KHI PHÁT NHẠC ===
-player.on("trackStart", (queue, track) => {
-	if (queue.userdata?.channel) {
-		const embed = new EmbedBuilder()
-			.setColor("#FF5500")
-			.setTitle("🎶 Đang phát nhạc")
-			.setDescription(`[${track.title}](${track.url || track.uri || "#"})`)
-			.addFields(
-				{ name: "👤 Tác giả / Kênh", value: track.author || track.artist || "SoundCloud", inline: true },
-				{ name: "⏱️ Thời lượng", value: track.duration ? `${track.duration}` : "Live / Không rõ", inline: true }
-			)
-			.setThumbnail(track.thumbnail || track.artworkUrl || null)
-			.setFooter({ text: "Chúc bạn nghe nhạc vui vẻ! 🎧" });
+/* =========================================================
+   DISCORD CLIENT
+========================================================= */
 
-		queue.userdata.channel.send({ embeds: [embed] }).catch(() => {
-			queue.userdata.channel.send(`▶ **Đang phát:** **${track.title}**`);
-		});
-	}
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
-player.on("trackAdd", (queue, track) => {
-	if (queue.userdata?.channel) {
-		queue.userdata.channel.send(`✅ **Đã thêm vào hàng đợi:** **${track.title}**`);
-	}
+/* =========================================================
+   PLAYER MANAGER
+========================================================= */
+
+const manager = new PlayerManager({
+  plugins: [
+    new YouTubePlugin(),
+    new SpotifyPlugin(),
+    new TTSPlugin(),
+    new InfinityPlugin(),
+  ],
+  autoCleanup: false,
+  leaveOnEmpty: false,
+  leaveOnEnd: false,
+  extractorTimeout: 60000,
 });
 
-player.on("error", (queue, error) => {
-	console.log(`[${queue.guild.id}] Error emitted from the queue: ${error}`);
+/* =========================================================
+   READY
+========================================================= */
+
+client.once(Events.ClientReady, (readyClient) => {
+  console.log("========================================");
+  console.log("🤖 BOT MUSIC ĐÃ ONLINE SẴN SÀNG");
+  console.log(`👤 ${readyClient.user.tag}`);
+  console.log("🎵 Nguồn hỗ trợ: YouTube, Spotify, Infinity");
+  console.log("========================================");
 });
 
-client.on("clientReady", () => {
-	console.log(`Logged in as ${client.user.tag}`);
+/* =========================================================
+   EQUALIZER / FILTER
+========================================================= */
+
+const applyClarity = async (player) => {
+  if (!player) return false;
+
+  try {
+    if (player.filter && typeof player.filter.applyFilter === "function") {
+      await player.filter.applyFilter("trebleboost");
+    }
+    return true;
+  } catch (error) {
+    console.warn("⚠️ Bỏ qua lỗi áp dụng EQ:", error?.message || error);
+    return true;
+  }
+};
+
+/* =========================================================
+   EVENTS
+========================================================= */
+
+manager.on("trackStart", async (player, track) => {
+  console.log(`[${player.guildId}] ▶️ Đang phát: ${track?.title || "Unknown"}`);
+  await applyClarity(player);
 });
 
-// 3. Xử lý Lệnh
-client.on("messageCreate", async (message) => {
-	if (message.author.bot || !message.guild) return;
-	if (!message.content.startsWith(prefix)) return;
-
-	const args = message.content.slice(prefix.length).trim().split(/ +/g);
-	const command = args.shift().toLowerCase();
-
-	// === LỆNH TRỢ GIÚP (HELP) ===
-	if (command === "help" || command === "h") {
-		return message.channel.send(
-			"📜 **DANH SÁCH LỆNH BOT NHẠC**\n\n" +
-			"🎵 `!play <tên bài/URL>` (hoặc `!p`): Phát nhạc từ YouTube, Spotify, SoundCloud\n" +
-			"⏭ `!skip` (hoặc `!s`): Bỏ qua bài hát hiện tại\n" +
-			"⏸ `!pause`: Tạm dừng phát nhạc\n" +
-			"▶ `!resume` (hoặc `!r`): Tiếp tục phát nhạc\n" +
-			"⏹ `!stop`: Dừng phát nhạc và xóa hàng đợi\n" +
-			"📜 `!queue` (hoặc `!q`): Xem danh sách bài hát trong hàng đợi\n" +
-			"🔊 `!volume <0-100>` (hoặc `!vol`): Điều chỉnh âm lượng\n" +
-			"🔁 `!autoplay`: Bật/Tắt chế độ tự động phát bài tiếp theo\n" +
-			"🎧 `!nowplaying` (hoặc `!np`): Xem thông tin bài hát đang phát\n" +
-			"👋 `!leave`: Ngắt kết nối bot khỏi kênh thoại"
-		);
-	}
-
-	if (command === "play" || command === "p") {
-		if (!args[0]) return message.channel.send("❌ | Vui lòng nhập tên bài hát hoặc đường link!");
-		if (!message.member.voice.channel) return message.channel.send("❌ | Bạn phải tham gia một kênh thoại trước!");
-
-		let inputUrl = args.join(" ");
-		const statusMsg = await message.channel.send(`🔍 **Đang xử lý nguồn SoundCloud...**`);
-
-		try {
-			// Giải mã link rút gọn on.soundcloud.com nếu có
-			if (inputUrl.includes("on.soundcloud.com")) {
-				try {
-					const response = await fetch(inputUrl, { method: "HEAD", redirect: "follow" });
-					inputUrl = response.url;
-				} catch (err) {
-					console.error("Lỗi giải mã link rút gọn SoundCloud:", err);
-				}
-			}
-
-			const queue = await player.create(message.guild.id, {
-				userdata: { channel: message.channel },
-				selfDeaf: true,
-			});
-
-			if (!queue.connection) {
-				await queue.connect(message.member.voice.channel);
-			}
-
-			// Nếu phát link SoundCloud
-			if (inputUrl.includes("soundcloud.com")) {
-				const info = await play.soundcloud(inputUrl).catch((e) => {
-					console.error("SoundCloud Fetch Error:", e);
-					return null;
-				});
-
-				if (!info) {
-					return statusMsg.edit("❌ | Không thể tải bài hát từ link SoundCloud này.").catch(() => {});
-				}
-
-				const streamData = await play.stream(inputUrl);
-
-				await queue.play(streamData.stream, {
-					type: streamData.type,
-					title: info.name || "SoundCloud Track",
-					author: info.user?.name || "SoundCloud",
-					url: inputUrl,
-					thumbnail: info.thumbnail || null,
-					duration: info.durationInSec || 0,
-				});
-
-				statusMsg.edit(`🔎 **Đã tải phát trực tiếp từ SoundCloud:** \`${info.name}\``).catch(() => {});
-			} else {
-				// Phát qua YouTube/Spotify mặc định nếu không phải link SoundCloud
-				const track = await queue.play(inputUrl);
-				if (!track) return statusMsg.edit("❌ | Không tìm thấy bài hát.");
-				statusMsg.edit(`🔎 **Đã tải xong:** \`${track.title}\``).catch(() => {});
-			}
-
-		} catch (e) {
-			console.error("Play error:", e);
-			return statusMsg.edit("❌ | Lỗi phát nhạc từ SoundCloud. SoundCloud chặn IP hoặc bài viết riêng tư.").catch(() => {});
-		}
-		return;
-	}
-
-	const queue = player.get(message.guild.id);
-	if (!queue || !queue.isPlaying) return message.channel.send("❌ | Hiện tại không có nhạc đang phát");
-
-	if (command === "skip" || command === "s") {
-		queue.skip();
-		message.channel.send("⏭ | Đã bỏ qua bài hát hiện tại");
-	} else if (command === "autoplay") {
-		queue.queue.autoPlay(!queue.queue.autoPlay());
-		message.channel.send(`🔁 | Chế độ Tự động phát hiện là: **${queue.queue.autoPlay() ? "Bật" : "Tắt"}**`);
-	} else if (command === "stop") {
-		queue.stop();
-		message.channel.send("⏹ | Đã dừng phát nhạc và xóa danh sách chờ");
-	} else if (command === "pause") {
-		if (queue.isPaused) return message.channel.send("❌ | Nhạc đã tạm dừng rồi");
-		queue.pause();
-		message.channel.send("⏸ | Đã tạm dừng phát nhạc");
-	} else if (command === "resume" || command === "r") {
-		if (!queue.isPaused) return message.channel.send("❌ | Nhạc vẫn đang phát bình thường");
-		queue.resume();
-		message.channel.send("▶ | Tiếp tục phát nhạc");
-	} else if (command === "queue" || command === "q") {
-		const current = queue.currentTrack;
-		const list = queue.upcomingTracks
-			.map((t, i) => `${i + 1}. ${t.title} - ${t.requestedBy}`)
-			.slice(0, 10)
-			.join("\n");
-		message.channel.send(
-			`**Bài hát đang phát:**\n${current ? `${current.title} - ${current.requestedBy}` : "Không có"}\n\n**Danh sách chờ:**\n${
-				list.length > 0 ? list : "Không có bài hát nào trong hàng đợi"
-			}`
-		);
-	} else if (command === "volume" || command === "vol") {
-		if (!args[0]) return message.channel.send(`🔊 | Âm lượng hiện tại: **${queue.volume}**`);
-		const volume = parseInt(args[0]);
-		if (isNaN(volume) || volume < 0 || volume > 100)
-			return message.channel.send("❌ | Âm lượng phải là một số từ 0 đến 100");
-		queue.setVolume(volume);
-		message.channel.send(`🔊 | Đã chỉnh âm lượng thành: **${volume}**`);
-	} else if (command === "nowplaying" || command === "np") {
-		const current = queue.currentTrack;
-		const progress = queue.getProgressBar();
-		message.channel.send(`▶ | Đang phát: **${current ? current.title : "Không rõ"}**\n${progress}`);
-	} else if (command === "leave") {
-		queue.destroy();
-		message.channel.send("👋 | Đã rời khỏi kênh thoại");
-	}
+manager.on("trackEnd", (player, track) => {
+  console.log(`[${player.guildId}] ⏹️ Kết thúc: ${track?.title || "Unknown"}`);
 });
 
-process.on("uncaughtException", (err) => console.error("Uncaught:", err));
-process.on("unhandledRejection", (err) => console.error("Unhandled:", err));
+manager.on("queueEnd", (player) => {
+  console.log(`[${player.guildId}] 📭 Hàng đợi đã hết.`);
+});
 
-client.login(process.env.DISCORD_TOKEN || process.env.TOKEN);
+manager.on("playerError", (player, error, track) => {
+  console.error("========================================");
+  console.error(`❌ PLAYER ERROR [${player?.guildId || "unknown"}]`);
+  console.error("Track:", track?.title || "Không xác định");
+  console.error(error);
+  console.error("========================================");
+});
+
+/* =========================================================
+   MESSAGE COMMAND
+========================================================= */
+
+client.on(Events.MessageCreate, async (msg) => {
+  try {
+    if (!msg.guildId || msg.author.bot || !msg.content.startsWith("!")) return;
+
+    const parts = msg.content.slice(1).trim().split(/\s+/);
+    const command = parts.shift()?.toLowerCase();
+    const query = parts.join(" ").trim();
+
+    const musicCommands = [
+      "help", "h", "play", "p", "scplay", "sc", "pause", "resume", 
+      "skip", "s", "stop", "volume", "vol", "filter", "clarity", 
+      "queue", "q", "nowplaying", "np", "join", "leave"
+    ];
+
+    if (!musicCommands.includes(command)) return;
+
+    /* HELP */
+    if (command === "help" || command === "h") {
+      const helpEmbed = new EmbedBuilder()
+        .setColor("#0099ff")
+        .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
+        .setDescription("Tiền tố lệnh là: `!`\nTrình phát hỗ trợ các nguồn: **YouTube, Spotify, Infinity**.")
+        .addFields(
+          {
+            name: "▶️ Phát Nhạc",
+            value: 
+              "`!play <tên bài/link>` (hoặc `!p`): Phát nhạc từ YT, Spotify...\n" +
+              "`!scplay <tên bài/link>` (hoặc `!sc`): Tìm và phát nhạc từ SoundCloud.",
+          },
+          {
+            name: "🎛️ Điều Khiển Trình Phát",
+            value: 
+              "`!pause`: Tạm dừng bài hát.\n" +
+              "`!resume`: Tiếp tục phát nhạc.\n" +
+              "`!skip` (hoặc `!s`): Bỏ qua bài hiện tại (Chỉ dành cho người yêu cầu).\n" +
+              "`!stop`: Dừng phát và xóa hàng đợi.\n" +
+              "`!volume <0-200>` (hoặc `!vol`): Chỉnh âm lượng bot.",
+          },
+          {
+            name: "✨ Tối Ưu Âm Thanh & Hàng Đợi",
+            value: 
+              "`!clarity` (hoặc `!filter`): Bật bộ lọc làm rõ âm thanh Clarity EQ.\n" +
+              "`!queue` (hoặc `!q`): Xem danh sách hàng đợi 10 bài tiếp theo.\n" +
+              "`!nowplaying` (hoặc `!np`): Xem bài hát đang phát.",
+          },
+          {
+            name: "📌 Kênh Voice",
+            value: 
+              "`!join`: Cho bot vào phòng voice của bạn.\n" +
+              "`!leave`: Cho bot rời phòng voice.",
+          }
+        )
+        .setFooter({ text: "Chúc bạn nghe nhạc vui vẻ!" });
+
+      return msg.reply({ embeds: [helpEmbed] });
+    }
+
+    const voiceChannel = msg.member?.voice?.channel;
+
+    let player = manager.get(msg.guildId);
+
+    const getOrCreatePlayer = async () => {
+      if (!player) {
+        player = await manager.create(msg.guildId, {
+          volume: 100,
+          loudnessNormalization: { enabled: false },
+          antiStuck: {
+            enabled: true,
+            maxRetries: 3,
+            retryDelayMs: 1000,
+            reusePreloadFirst: true,
+            reduceQualityOnRetry: true,
+          },
+          leaveOnEmpty: false,
+          leaveOnEnd: false,
+          extractorTimeout: 60000,
+          lowPerformance: false,
+          preload: {
+            enabled: true,
+            autoDisableInLowPerformance: true,
+          },
+        });
+      }
+      return player;
+    };
+
+    /* JOIN */
+    if (command === "join") {
+      if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice trước.");
+      try {
+        const activePlayer = await getOrCreatePlayer();
+        if (!activePlayer.connection) {
+          await activePlayer.connect(voiceChannel, { selfDeaf: true });
+        }
+        return msg.reply(`📌 Đã vào **${voiceChannel.name}**`);
+      } catch (error) {
+        return msg.reply("❌ Không thể vào voice.");
+      }
+    }
+
+    /* LEAVE */
+    if (command === "leave") {
+      if (!player) return msg.reply("❌ Bot chưa ở trong phòng voice.");
+      player.destroy();
+      return msg.reply("👋 Bot đã rời phòng voice.");
+    }
+
+    /* PLAY / SCPLAY */
+    if (command === "play" || command === "p" || command === "scplay" || command === "sc") {
+      if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice trước.");
+      if (!query) return msg.reply("❌ Dùng: `!play <tên bài/URL>` hoặc `!sc <tên bài hát SoundCloud>`");
+
+      const activePlayer = await getOrCreatePlayer();
+
+      try {
+        if (!activePlayer.connection) {
+          await activePlayer.connect(voiceChannel, { selfDeaf: true });
+        }
+      } catch (error) {
+        return msg.reply("❌ Không kết nối được voice.");
+      }
+
+      const replyMsg = await msg.reply("🔎 Đang tìm và tải nhạc...");
+
+      try {
+        let searchQuery = query.trim();
+
+        if (command === "scplay" || command === "sc") {
+          if (!searchQuery.startsWith("http://") && !searchQuery.startsWith("https://")) {
+            searchQuery = `scsearch:${searchQuery}`;
+          }
+        }
+
+        const result = await activePlayer.play(searchQuery, msg.author.id);
+
+        if (result?.type === "PLAYLIST" || Array.isArray(result?.tracks)) {
+          const count = result?.tracks?.length || 0;
+          return replyMsg.edit(`🎶 Đã thêm playlist **${count} bài** vào hàng đợi.`);
+        }
+
+        const trackName = result?.track?.title || result?.title || activePlayer.currentTrack?.title || query;
+        return replyMsg.edit(`▶️ Đã phát/thêm bài hát:\n**${trackName}**`);
+      } catch (error) {
+        console.error("❌ PLAY ERROR:", error);
+        return replyMsg.edit("❌ Không thể tải/phát bài hát này.");
+      }
+    }
+
+    if (!player) return msg.reply("❌ Hiện tại bot chưa hoạt động trong Server này.");
+
+    /* PAUSE */
+    if (command === "pause") {
+      if (!player.isPlaying) return msg.reply("❌ Nhạc không đang phát.");
+      player.pause();
+      return msg.reply("⏸️ Đã tạm dừng.");
+    }
+
+    /* RESUME */
+    if (command === "resume") {
+      if (!player.isPaused) return msg.reply("❌ Nhạc đang phát rồi.");
+      player.resume();
+      return msg.reply("▶️ Đã phát tiếp.");
+    }
+
+    /* SKIP (CHỈ CHO PHÉP NGƯỜI BẬT BÀI HÁT SKIP) */
+    if (command === "skip" || command === "s") {
+      if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice để sử dụng lệnh này.");
+      
+      const currentTrack = player.currentTrack;
+      if (!currentTrack) return msg.reply("❌ Không có bài hát nào đang phát.");
+
+      const isRequester = currentTrack.requestedBy === msg.author.id;
+
+      if (!isRequester) {
+        return msg.reply("🔒 Chỉ người đã yêu cầu bài hát này mới có quyền skip!");
+      }
+
+      player.skip();
+      return msg.reply(`⏭️ **${msg.author.displayName}** đã bỏ qua bài hát!`);
+    }
+
+    /* STOP */
+    if (command === "stop") {
+      player.stop();
+      return msg.reply("⏹️ Đã dừng nhạc.");
+    }
+
+    /* VOLUME */
+    if (command === "volume" || command === "vol") {
+      const vol = Number.parseInt(query, 10);
+      if (Number.isNaN(vol) || vol < 0 || vol > 200) return msg.reply("❌ Volume từ 0 đến 200.");
+      player.setVolume(vol);
+      return msg.reply(`🔊 Volume: **${vol}%**`);
+    }
+
+    /* CLARITY / FILTER */
+    if (command === "clarity" || command === "filter") {
+      if (!player.currentTrack && !player.isPlaying) {
+        return msg.reply("❌ Không có bài hát nào đang phát để áp dụng bộ lọc.");
+      }
+      await applyClarity(player);
+      return msg.reply("✨ Đã bật **Clarity EQ** – dải âm thanh đã được tối ưu!");
+    }
+
+    /* QUEUE */
+    if (command === "queue" || command === "q") {
+      const tracks = player.upcomingTracks?.slice(0, 10) || [];
+      const queueList = tracks.length ? tracks.map((t, i) => `**${i + 1}.** ${t.title}`).join("\n") : "Hàng đợi trống.";
+      return msg.reply({ embeds: [new EmbedBuilder().setTitle("🎶 Hàng đợi").setDescription(queueList)] });
+    }
+
+    /* NOW PLAYING */
+    if (command === "nowplaying" || command === "np") {
+      const track = player.currentTrack;
+      if (!track) return msg.reply("❌ Không có bài nào đang phát.");
+      return msg.reply(`🎵 Đang phát: **${track.title}**`);
+    }
+
+  } catch (error) {
+    console.error("🔥 ERROR:", error);
+  }
+});
+
+/* =========================================================
+   LOGIN & WEB SERVER FOR RENDER
+========================================================= */
+
+client.login(TOKEN);
+
+const port = process.env.PORT || 3000;
+
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Bot Discord Online 24/7!");
+}).listen(port, () => {
+  console.log(`🌐 Web server running on port ${port}`);
+});
