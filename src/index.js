@@ -1,7 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const { PlayerManager } = require("ziplayer");
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin } = require("@ziplayer/plugin");
 
 // 1. Web Server Keep-Alive giúp Render luôn online
@@ -58,18 +58,32 @@ try {
 }
 // =============================
 
-// Trình lắng nghe sự kiện của Player
+// === CHỈ THÊM/SỬA PHẦN TRẢ LỜI KHI PHÁT NHẠC TẠI ĐÂY ===
 player.on("trackStart", (queue, track) => {
 	if (queue.userdata?.channel) {
-		queue.userdata.channel.send(`▶ Started playing: **${track.title}**`);
+		const embed = new EmbedBuilder()
+			.setColor("#FF5500")
+			.setTitle("🎶 Đang phát nhạc")
+			.setDescription(`[${track.title}](${track.url || track.uri || "#"})`)
+			.addFields(
+				{ name: "👤 Tác giả / Kênh", value: track.author || track.artist || "Không rõ", inline: true },
+				{ name: "⏱️ Thời lượng", value: track.duration ? `${track.duration}` : "Live / Không rõ", inline: true }
+			)
+			.setThumbnail(track.thumbnail || track.artworkUrl || null)
+			.setFooter({ text: "Chúc bạn nghe nhạc vui vẻ! 🎧" });
+
+		queue.userdata.channel.send({ embeds: [embed] }).catch(() => {
+			queue.userdata.channel.send(`▶ **Đang phát:** **${track.title}**`);
+		});
 	}
 });
 
 player.on("trackAdd", (queue, track) => {
 	if (queue.userdata?.channel) {
-		queue.userdata.channel.send(`✅ Added to queue: **${track.title}**`);
+		queue.userdata.channel.send(`✅ **Đã thêm vào hàng đợi:** **${track.title}**`);
 	}
 });
+// ====================================================
 
 player.on("error", (queue, error) => {
 	console.log(`[${queue.guild.id}] Error emitted from the queue: ${error}`);
@@ -79,7 +93,7 @@ player.on("willPlay", (playerInstance, track, upcomming) => {
 	console.log(`${track.title} will play next!`);
 	if (playerInstance.userdata?.channel) {
 		playerInstance.userdata.channel.send(
-			`⏭ | Upcoming: **${track.title}**\n${upcomming.map((t) => `${t.title}`).join("\n")}`
+			`⏭ | Bài tiếp theo: **${track.title}**\n${upcomming.map((t) => `${t.title}`).join("\n")}`
 		);
 	}
 });
@@ -114,8 +128,8 @@ client.on("messageCreate", async (message) => {
 	}
 
 	if (command === "play" || command === "p") {
-		if (!args[0]) return message.channel.send("❌ | Please provide a song name or URL");
-		if (!message.member.voice.channel) return message.channel.send("❌ | You must be in a voice channel");
+		if (!args[0]) return message.channel.send("❌ | Vui lòng nhập tên bài hát hoặc đường link!");
+		if (!message.member.voice.channel) return message.channel.send("❌ | Bạn phải tham gia một kênh thoại trước!");
 
 		const queue = await player.create(message.guild.id, {
 			userdata: {
@@ -128,37 +142,37 @@ client.on("messageCreate", async (message) => {
 			if (!queue.connection) await queue.connect(message.member.voice.channel);
 			const success = await queue.play(args.join(" ")).catch((e) => {
 				console.log("Play error:", e && e.stack ? e.stack : e);
-				return message.channel.send("❌ | No results found");
+				return message.channel.send("❌ | Không tìm thấy kết quả phù hợp");
 			});
 
-			if (success) message.channel.send(`✅ | Enqueued **${args.join(" ")}**`);
+			if (success) message.channel.send(`🔍 **Đã tìm kiếm:** \`${args.join(" ")}\``);
 		} catch (e) {
 			console.log("Connect error:", e && e.stack ? e.stack : e);
-			return message.channel.send("❌ | Could not join your voice channel");
+			return message.channel.send("❌ | Bot không thể vào kênh thoại của bạn");
 		}
 		return;
 	}
 
 	const queue = player.get(message.guild.id);
-	if (!queue || !queue.isPlaying) return message.channel.send("❌ | No music is being played");
+	if (!queue || !queue.isPlaying) return message.channel.send("❌ | Hiện tại không có nhạc đang phát");
 
 	if (command === "skip" || command === "s") {
 		queue.skip();
-		message.channel.send("⏭ | Skipped the current track");
+		message.channel.send("⏭ | Đã bỏ qua bài hát hiện tại");
 	} else if (command === "autoplay") {
 		queue.queue.autoPlay(!queue.queue.autoPlay());
-		message.channel.send(`🔁 | Autoplay is now: **${queue.queue.autoPlay() ? "Enabled" : "Disabled"}`);
+		message.channel.send(`🔁 | Chế độ Tự động phát hiện là: **${queue.queue.autoPlay() ? "Bật" : "Tắt"}**`);
 	} else if (command === "stop") {
 		queue.stop();
-		message.channel.send("⏹ | Stopped the music and cleared the queue");
+		message.channel.send("⏹ | Đã dừng phát nhạc và xóa danh sách chờ");
 	} else if (command === "pause") {
-		if (queue.isPaused) return message.channel.send("❌ | Music is already paused");
+		if (queue.isPaused) return message.channel.send("❌ | Nhạc đã tạm dừng rồi");
 		queue.pause();
-		message.channel.send("⏸ | Paused the music");
+		message.channel.send("⏸ | Đã tạm dừng phát nhạc");
 	} else if (command === "resume" || command === "r") {
-		if (!queue.isPaused) return message.channel.send("❌ | Music is not paused");
+		if (!queue.isPaused) return message.channel.send("❌ | Nhạc vẫn đang phát bình thường");
 		queue.resume();
-		message.channel.send("▶ | Resumed the music");
+		message.channel.send("▶ | Tiếp tục phát nhạc");
 	} else if (command === "queue" || command === "q") {
 		const current = queue.currentTrack;
 		const list = queue.upcomingTracks
@@ -166,24 +180,24 @@ client.on("messageCreate", async (message) => {
 			.slice(0, 10)
 			.join("\n");
 		message.channel.send(
-			`**Current Track:**\n${current ? `${current.title} - ${current.requestedBy}` : "None"}\n\n**Queue:**\n${
-				list.length > 0 ? list : "No more tracks in the queue"
+			`**Bài hát đang phát:**\n${current ? `${current.title} - ${current.requestedBy}` : "Không có"}\n\n**Danh sách chờ:**\n${
+				list.length > 0 ? list : "Không có bài hát nào trong hàng đợi"
 			}`
 		);
 	} else if (command === "volume" || command === "vol") {
-		if (!args[0]) return message.channel.send(`🔊 | Current volume is: **${queue.volume}**`);
+		if (!args[0]) return message.channel.send(`🔊 | Âm lượng hiện tại: **${queue.volume}**`);
 		const volume = parseInt(args[0]);
 		if (isNaN(volume) || volume < 0 || volume > 100)
-			return message.channel.send("❌ | Volume must be a number between 0 and 100");
+			return message.channel.send("❌ | Âm lượng phải là một số từ 0 đến 100");
 		queue.setVolume(volume);
-		message.channel.send(`🔊 | Volume set to: **${volume}**`);
+		message.channel.send(`🔊 | Đã chỉnh âm lượng thành: **${volume}**`);
 	} else if (command === "nowplaying" || command === "np") {
 		const current = queue.currentTrack;
 		const progress = queue.getProgressBar();
-		message.channel.send(`▶ | Now playing: **${current ? current.title : "Unknown"}**\n${progress}`);
+		message.channel.send(`▶ | Đang phát: **${current ? current.title : "Không rõ"}**\n${progress}`);
 	} else if (command === "leave") {
 		queue.destroy();
-		message.channel.send("👋 | Left the voice channel");
+		message.channel.send("👋 | Đã rời khỏi kênh thoại");
 	}
 });
 
