@@ -93,14 +93,40 @@ const applyClarity = async (player) => {
 manager.on("trackStart", async (player, track) => {
   console.log(`[${player.guildId}] ▶️ Đang phát: ${track?.title || "Unknown"}`);
   await applyClarity(player);
+
+  // Đổi Voice Channel Status sang tên bài hát
+  try {
+    const channelId = player.connection?.channelId || player.voiceChannelId;
+    if (channelId) {
+      const voiceChannel = await client.channels.fetch(channelId);
+      if (voiceChannel && typeof voiceChannel.setStatus === "function") {
+        await voiceChannel.setStatus(track?.title || "Đang phát nhạc...");
+      }
+    }
+  } catch (err) {
+    console.warn("⚠️ Không thể đổi Voice Status:", err?.message || err);
+  }
 });
 
 manager.on("trackEnd", (player, track) => {
   console.log(`[${player.guildId}] ⏹️ Kết thúc: ${track?.title || "Unknown"}`);
 });
 
-manager.on("queueEnd", (player) => {
+manager.on("queueEnd", async (player) => {
   console.log(`[${player.guildId}] 📭 Hàng đợi đã hết.`);
+
+  // Xóa Voice Channel Status khi hết nhạc
+  try {
+    const channelId = player.connection?.channelId || player.voiceChannelId;
+    if (channelId) {
+      const voiceChannel = await client.channels.fetch(channelId);
+      if (voiceChannel && typeof voiceChannel.setStatus === "function") {
+        await voiceChannel.setStatus("");
+      }
+    }
+  } catch (err) {
+    console.warn("⚠️ Không thể xóa Voice Status:", err?.message || err);
+  }
 });
 
 manager.on("playerError", (player, error, track) => {
@@ -222,6 +248,14 @@ client.on(Events.MessageCreate, async (msg) => {
     /* LEAVE */
     if (command === "leave") {
       if (!player) return msg.reply("❌ Bot chưa ở trong phòng voice.");
+
+      // Reset trạng thái voice channel khi rời phòng
+      try {
+        if (voiceChannel && typeof voiceChannel.setStatus === "function") {
+          await voiceChannel.setStatus("");
+        }
+      } catch (e) {}
+
       player.destroy();
       return msg.reply("👋 Bot đã rời phòng voice.");
     }
@@ -303,6 +337,14 @@ client.on(Events.MessageCreate, async (msg) => {
     /* STOP */
     if (command === "stop") {
       player.stop();
+
+      // Reset trạng thái voice channel khi dừng nhạc
+      try {
+        if (voiceChannel && typeof voiceChannel.setStatus === "function") {
+          await voiceChannel.setStatus("");
+        }
+      } catch (e) {}
+
       return msg.reply("⏹️ Đã dừng nhạc.");
     }
 
