@@ -268,6 +268,12 @@ client.on(Events.MessageCreate, async (msg) => {
     /* PAUSE */
     if (command === "pause") {
       if (!player.isPlaying) return msg.reply("❌ Nhạc không đang phát.");
+      
+      const currentTrack = player.currentTrack;
+      if (currentTrack && currentTrack.requestedBy !== msg.author.id) {
+        return msg.reply("🔒 Chỉ người đã yêu cầu bài hát này mới có quyền pause!");
+      }
+
       player.pause();
       return msg.reply("⏸️ Đã tạm dừng.");
     }
@@ -275,6 +281,12 @@ client.on(Events.MessageCreate, async (msg) => {
     /* RESUME */
     if (command === "resume") {
       if (!player.isPaused) return msg.reply("❌ Nhạc đang phát rồi.");
+
+      const currentTrack = player.currentTrack;
+      if (currentTrack && currentTrack.requestedBy !== msg.author.id) {
+        return msg.reply("🔒 Chỉ người đã yêu cầu bài hát này mới có quyền resume!");
+      }
+
       player.resume();
       return msg.reply("▶️ Đã phát tiếp.");
     }
@@ -298,6 +310,11 @@ client.on(Events.MessageCreate, async (msg) => {
 
     /* STOP */
     if (command === "stop") {
+      const currentTrack = player.currentTrack;
+      if (currentTrack && currentTrack.requestedBy !== msg.author.id) {
+        return msg.reply("🔒 Chỉ người đã yêu cầu bài hát này mới có quyền stop!");
+      }
+
       player.stop();
       return msg.reply("⏹️ Đã dừng nhạc.");
     }
