@@ -138,9 +138,7 @@ manager.on("trackStart", async (player, track) => {
   if (player.nowPlayingMessage) {
     try {
       await player.nowPlayingMessage.delete();
-    } catch (e) {
-      // Bỏ qua lỗi nếu tin nhắn cũ đã bị xóa trước đó
-    }
+    } catch (e) {}
     player.nowPlayingMessage = null;
   }
 
@@ -210,7 +208,7 @@ manager.on("trackStart", async (player, track) => {
         return interaction.reply({ content: "❌ Không tìm thấy trình phát nhạc.", ephemeral: true });
       }
 
-      // Phân quyền: Chỉ người đã yêu cầu bài hát mới được dùng các nút
+      // Phân quyền nút bấm: Chỉ người đã yêu cầu bài hát mới được sử dụng
       const currentReq = p.currentTrack?.requestedBy;
       if (currentReq && currentReq !== interaction.user.id) {
         return interaction.reply({ 
@@ -421,10 +419,8 @@ client.on(Events.MessageCreate, async (msg) => {
 
           if (!trackName) {
             await replyMsg.edit({ content: "❌ Không tìm thấy thông tin bài hát từ đường link này." });
-          } else if (activePlayer.isPlaying && activePlayer.currentTrack !== track) {
-            await replyMsg.edit({ content: `🎶 Đã thêm **${trackName}** vào hàng đợi.` });
           } else {
-            await replyMsg.delete().catch(() => {});
+            await replyMsg.edit({ content: `🎶 Đã thêm **${trackName}** vào hàng đợi.` });
           }
         }
 
@@ -437,9 +433,22 @@ client.on(Events.MessageCreate, async (msg) => {
 
     if (!player) return msg.reply("❌ Hiện tại bot chưa hoạt động trong Server này.");
 
+    // Helper kiểm tra quyền sở hữu bài hát cho các lệnh văn bản
+    const checkRequesterPermission = () => {
+      const currentTrack = player.currentTrack;
+      if (!currentTrack) return { allowed: false, reason: "❌ Không có bài hát nào đang phát." };
+      if (currentTrack.requestedBy !== msg.author.id) {
+        return { allowed: false, reason: "🔒 Chỉ người đã yêu cầu bài hát này mới có quyền thực hiện!" };
+      }
+      return { allowed: true };
+    };
+
     /* PAUSE */
     if (command === "pause") {
       if (!player.isPlaying) return msg.reply("❌ Nhạc không đang phát.");
+      const check = checkRequesterPermission();
+      if (!check.allowed) return msg.reply(check.reason);
+
       player.pause();
       return msg.reply("⏸️ Đã tạm dừng.");
     }
@@ -447,22 +456,18 @@ client.on(Events.MessageCreate, async (msg) => {
     /* RESUME */
     if (command === "resume") {
       if (!player.isPaused) return msg.reply("❌ Nhạc đang phát rồi.");
+      const check = checkRequesterPermission();
+      if (!check.allowed) return msg.reply(check.reason);
+
       player.resume();
       return msg.reply("▶️ Đã phát tiếp.");
     }
 
-    /* SKIP (CHỈ CHO PHÉP NGƯỜI BẬT BÀI HÁT SKIP) */
+    /* SKIP */
     if (command === "skip" || command === "s") {
       if (!voiceChannel) return msg.reply("❌ Bạn phải vào phòng voice để sử dụng lệnh này.");
-      
-      const currentTrack = player.currentTrack;
-      if (!currentTrack) return msg.reply("❌ Không có bài hát nào đang phát.");
-
-      const isRequester = currentTrack.requestedBy === msg.author.id;
-
-      if (!isRequester) {
-        return msg.reply("🔒 Chỉ người đã yêu cầu bài hát này mới có quyền skip!");
-      }
+      const check = checkRequesterPermission();
+      if (!check.allowed) return msg.reply(check.reason);
 
       player.skip();
       return msg.reply(`⏭️ **${msg.author.displayName}** đã bỏ qua bài hát!`);
@@ -470,6 +475,9 @@ client.on(Events.MessageCreate, async (msg) => {
 
     /* STOP */
     if (command === "stop") {
+      const check = checkRequesterPermission();
+      if (!check.allowed) return msg.reply(check.reason);
+
       player.stop();
       return msg.reply("⏹️ Đã dừng nhạc.");
     }
