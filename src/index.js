@@ -133,6 +133,111 @@ const applyClarity = async (player) => {
 manager.on("trackStart", async (player, track) => {
   console.log(`[${player.guildId}] ▶️ Đang phát: ${track?.title || "Unknown"}`);
   await applyClarity(player);
+
+  // Xóa bảng Now Playing cũ nếu có
+  if (player.nowPlayingMessage) {
+    try {
+      await player.nowPlayingMessage.delete();
+    } catch (e) {
+      // Bỏ qua lỗi nếu tin nhắn cũ đã bị xóa trước đó
+    }
+    player.nowPlayingMessage = null;
+  }
+
+  // Tải thông tin người yêu cầu bài hát
+  let requesterName = "Unknown";
+  if (track?.requestedBy) {
+    try {
+      const user = await client.users.fetch(track.requestedBy);
+      requesterName = user.username;
+    } catch (e) {
+      requesterName = track.requestedBy;
+    }
+  }
+
+  const textChannel = player.textChannel || client.channels.cache.get(player.textChannelId);
+  if (!textChannel) return;
+
+  const trackName = track?.title || "Unknown Track";
+  const embed = new EmbedBuilder()
+    .setColor("#2b2d31")
+    .setTitle("🎶 Now Playing")
+    .setDescription(`**[${trackName}](${track?.url || "#"})**`)
+    .addFields(
+      { name: "Duration", value: `\`${formatDuration(track?.duration)}\``, inline: false },
+      { name: "Requested by", value: `${requesterName}`, inline: false }
+    )
+    .setFooter({ text: "Music Player Controls" });
+
+  if (track?.thumbnail) {
+    embed.setThumbnail(track.thumbnail);
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("btn_pause_resume")
+      .setLabel("Pause / Resume")
+      .setEmoji("⏯️")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("btn_skip")
+      .setLabel("Skip")
+      .setEmoji("⏭️")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("btn_stop")
+      .setLabel("End Session")
+      .setEmoji("⏹️")
+      .setStyle(ButtonStyle.Danger)
+  );
+
+  try {
+    const response = await textChannel.send({
+      embeds: [embed],
+      components: [row],
+    });
+
+    player.nowPlayingMessage = response;
+
+    const collector = response.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      time: track?.duration || 3600000,
+    });
+
+    collector.on("collect", async (interaction) => {
+      const p = manager.get(player.guildId);
+      if (!p) {
+        return interaction.reply({ content: "❌ Không tìm thấy trình phát nhạc.", ephemeral: true });
+      }
+
+      // Phân quyền: Chỉ người đã yêu cầu bài hát mới được dùng các nút
+      const currentReq = p.currentTrack?.requestedBy;
+      if (currentReq && currentReq !== interaction.user.id) {
+        return interaction.reply({ 
+          content: "🔒 Chỉ người đã yêu cầu bài hát này mới có quyền sử dụng các nút điều khiển!", 
+          ephemeral: true 
+        });
+      }
+
+      if (interaction.customId === "btn_pause_resume") {
+        if (p.isPaused) {
+          p.resume();
+          await interaction.reply({ content: "▶️ Đã tiếp tục phát nhạc.", ephemeral: true });
+        } else {
+          p.pause();
+          await interaction.reply({ content: "⏸️ Đã tạm dừng phát nhạc.", ephemeral: true });
+        }
+      } else if (interaction.customId === "btn_skip") {
+        await interaction.deferUpdate();
+        p.skip();
+      } else if (interaction.customId === "btn_stop") {
+        p.stop();
+        await interaction.reply({ content: "⏹️ Đã dừng phát nhạc và xóa hàng đợi.", ephemeral: true });
+      }
+    });
+  } catch (err) {
+    console.error("❌ Error sending Now Playing embed:", err);
+  }
 });
 
 manager.on("trackEnd", (player, track) => {
@@ -141,6 +246,12 @@ manager.on("trackEnd", (player, track) => {
 
 manager.on("queueEnd", async (player) => {
   console.log(`[${player.guildId}] 📭 Hàng đợi đã hết.`);
+  if (player.nowPlayingMessage) {
+    try {
+      await player.nowPlayingMessage.delete();
+    } catch (e) {}
+    player.nowPlayingMessage = null;
+  }
 });
 
 manager.on("playerError", (player, error, track) => {
@@ -242,6 +353,8 @@ client.on(Events.MessageCreate, async (msg) => {
           },
         });
       }
+      player.textChannel = msg.channel;
+      player.textChannelId = msg.channel.id;
       return player;
     };
 
@@ -301,91 +414,19 @@ client.on(Events.MessageCreate, async (msg) => {
 
         if (result?.type === "PLAYLIST" || Array.isArray(result?.tracks)) {
           const count = result?.tracks?.length || 0;
-          return replyMsg.edit({ content: `🎶 Đã thêm playlist **${count} bài** vào hàng đợi.` });
-        }
+          await replyMsg.edit({ content: `🎶 Đã thêm playlist **${count} bài** vào hàng đợi.` });
+        } else {
+          const track = result?.tracks?.[0] || result?.track || activePlayer.currentTrack;
+          const trackName = track?.title;
 
-        const track = result?.tracks?.[0] || result?.track || activePlayer.currentTrack;
-        const trackName = track?.title;
-
-        if (!trackName) {
-          return replyMsg.edit({ content: "❌ Không tìm thấy thông tin bài hát từ đường link này." });
-        }
-
-        // --- NÂNG CẤP GIAO DIỆN BẢNG EMBED VÀ NÚT TƯƠNG TÁC ---
-        const embed = new EmbedBuilder()
-          .setColor("#2b2d31")
-          .setTitle("🎶 Now Playing")
-          .setDescription(`**[${trackName}](${track?.url || searchQuery})**`)
-          .addFields(
-            { name: "Duration", value: `\`${formatDuration(track?.duration)}\``, inline: false },
-            { name: "Requested by", value: `${msg.author.username}`, inline: false }
-          )
-          .setFooter({ text: "Music Player Controls" });
-
-        if (track?.thumbnail) {
-          embed.setThumbnail(track.thumbnail);
-        }
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("btn_pause_resume")
-            .setLabel("Pause / Resume")
-            .setEmoji("⏯️")
-            .setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder()
-            .setCustomId("btn_skip")
-            .setLabel("Skip")
-            .setEmoji("⏭️")
-            .setStyle(ButtonStyle.Primary),
-          new ButtonBuilder()
-            .setCustomId("btn_stop")
-            .setLabel("End Session")
-            .setEmoji("⏹️")
-            .setStyle(ButtonStyle.Danger)
-        );
-
-        const response = await replyMsg.edit({
-          content: null,
-          embeds: [embed],
-          components: [row],
-        });
-
-        const collector = response.createMessageComponentCollector({
-          componentType: ComponentType.Button,
-          time: 3600000,
-        });
-
-        collector.on("collect", async (interaction) => {
-          const p = manager.get(msg.guildId);
-          if (!p) {
-            return interaction.reply({ content: "❌ Không tìm thấy trình phát nhạc.", ephemeral: true });
+          if (!trackName) {
+            await replyMsg.edit({ content: "❌ Không tìm thấy thông tin bài hát từ đường link này." });
+          } else if (activePlayer.isPlaying && activePlayer.currentTrack !== track) {
+            await replyMsg.edit({ content: `🎶 Đã thêm **${trackName}** vào hàng đợi.` });
+          } else {
+            await replyMsg.delete().catch(() => {});
           }
-
-          // Phân quyền: Chỉ người đã yêu cầu bài hát mới được dùng các nút
-          const currentReq = p.currentTrack?.requestedBy;
-          if (currentReq && currentReq !== interaction.user.id) {
-            return interaction.reply({ 
-              content: "🔒 Chỉ người đã yêu cầu bài hát này mới có quyền sử dụng các nút điều khiển!", 
-              ephemeral: true 
-            });
-          }
-
-          if (interaction.customId === "btn_pause_resume") {
-            if (p.isPaused) {
-              p.resume();
-              await interaction.reply({ content: "▶️ Đã tiếp tục phát nhạc.", ephemeral: true });
-            } else {
-              p.pause();
-              await interaction.reply({ content: "⏸️ Đã tạm dừng phát nhạc.", ephemeral: true });
-            }
-          } else if (interaction.customId === "btn_skip") {
-            p.skip();
-            await interaction.reply({ content: `⏭️ **${interaction.user.username}** đã bỏ qua bài hát!`, ephemeral: true });
-          } else if (interaction.customId === "btn_stop") {
-            p.stop();
-            await interaction.reply({ content: "⏹️ Đã dừng phát nhạc và xóa hàng đợi.", ephemeral: true });
-          }
-        });
+        }
 
         return;
       } catch (error) {
