@@ -414,8 +414,10 @@ client.on(Events.MessageCreate, async (msg) => {
           const count = result?.tracks?.length || 0;
           await replyMsg.edit({ content: `🎶 Đã thêm playlist **${count} bài** vào hàng đợi.` });
         } else {
-          const track = result?.tracks?.[0] || result?.track || activePlayer.currentTrack;
-          const trackName = track?.title;
+          // Lấy chính xác bài hát vừa được thêm vào cuối hàng đợi (hoặc bài đang phát nếu là bài đầu tiên)
+          const upcoming = activePlayer.upcomingTracks || [];
+          const addedTrack = upcoming.length > 0 ? upcoming[upcoming.length - 1] : (result?.track || activePlayer.currentTrack);
+          const trackName = addedTrack?.title;
 
           if (!trackName) {
             await replyMsg.edit({ content: "❌ Không tìm thấy thông tin bài hát từ đường link này." });
