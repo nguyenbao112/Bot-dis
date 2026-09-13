@@ -94,17 +94,19 @@ manager.on("trackStart", async (player, track) => {
   console.log(`[${player.guildId}] ▶️ Đang phát: ${track?.title || "Unknown"}`);
   await applyClarity(player);
 
-  // Đổi Voice Channel Status sang tên bài hát bằng cách truy vấn Guild Member
+  // Đổi Voice Channel Status
   try {
-    const guild = await client.guilds.fetch(player.guildId);
-    const botMember = await guild.members.fetch(client.user.id);
-    const voiceChannel = botMember.voice.channel;
-
-    if (voiceChannel && typeof voiceChannel.setStatus === "function") {
-      await voiceChannel.setStatus(track?.title || "Đang phát nhạc...");
+    const channelId = player.voiceChannelId || player.connection?.channelId;
+    if (channelId) {
+      const voiceChannel = await client.channels.fetch(channelId).catch(() => null);
+      if (voiceChannel && typeof voiceChannel.setStatus === "function") {
+        const titleText = (track?.title || "Đang phát nhạc...").slice(0, 50);
+        await voiceChannel.setStatus(titleText);
+        console.log(`[${player.guildId}] ✅ STATUS CHANGED: ${titleText}`);
+      }
     }
   } catch (err) {
-    console.warn("⚠️ Không thể đổi Voice Status:", err?.message || err);
+    console.warn(`[${player.guildId}] ⚠️ Không thể đổi Voice Status:`, err?.message || err);
   }
 });
 
@@ -117,15 +119,15 @@ manager.on("queueEnd", async (player) => {
 
   // Xóa Voice Channel Status khi hết nhạc
   try {
-    const guild = await client.guilds.fetch(player.guildId);
-    const botMember = await guild.members.fetch(client.user.id);
-    const voiceChannel = botMember.voice.channel;
-
-    if (voiceChannel && typeof voiceChannel.setStatus === "function") {
-      await voiceChannel.setStatus("");
+    const channelId = player.voiceChannelId || player.connection?.channelId;
+    if (channelId) {
+      const voiceChannel = await client.channels.fetch(channelId).catch(() => null);
+      if (voiceChannel && typeof voiceChannel.setStatus === "function") {
+        await voiceChannel.setStatus("");
+      }
     }
   } catch (err) {
-    console.warn("⚠️ Không thể xóa Voice Status:", err?.message || err);
+    console.warn(`[${player.guildId}] ⚠️ Không thể xóa Voice Status:`, err?.message || err);
   }
 });
 
