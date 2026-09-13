@@ -1,5 +1,6 @@
 import "dotenv/config";
 import http from "http";
+import https from "https";
 import {
   Client,
   GatewayIntentBits,
@@ -57,6 +58,29 @@ const manager = new PlayerManager({
   leaveOnEnd: false,
   extractorTimeout: 60000,
 });
+
+/* =========================================================
+   HELPER: RESOLVE SHORT LINK SOUNDCLOUD
+========================================================= */
+
+const resolveUrl = (url) => {
+  return new Promise((resolve) => {
+    if (!url.includes("on.soundcloud.com")) return resolve(url);
+
+    const clientReq = https.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return resolve(res.headers.location.split("?")[0]);
+      }
+      resolve(url);
+    });
+
+    clientReq.on("error", () => resolve(url));
+    clientReq.setTimeout(5000, () => {
+      clientReq.destroy();
+      resolve(url);
+    });
+  });
+};
 
 /* =========================================================
    READY
@@ -249,6 +273,10 @@ client.on(Events.MessageCreate, async (msg) => {
       try {
         let searchQuery = query.trim();
 
+        if (searchQuery.includes("on.soundcloud.com")) {
+          searchQuery = await resolveUrl(searchQuery);
+        }
+
         if (command === "scplay" || command === "sc") {
           const isUrl = searchQuery.startsWith("http://") || searchQuery.startsWith("https://");
           if (!isUrl && !searchQuery.startsWith("scsearch:")) {
@@ -263,7 +291,12 @@ client.on(Events.MessageCreate, async (msg) => {
           return replyMsg.edit(`🎶 Đã thêm playlist **${count} bài** vào hàng đợi.`);
         }
 
-        const trackName = result?.track?.title || result?.title || result?.tracks?.[0]?.title || query;
+        const trackName = result?.track?.title || result?.title || result?.tracks?.[0]?.title;
+
+        if (!trackName) {
+          return replyMsg.edit("❌ Không tìm thấy thông tin bài hát từ đường link này.");
+        }
+
         return replyMsg.edit(`▶️ Đã phát/thêm bài hát:\n**${trackName}**`);
       } catch (error) {
         console.error("❌ PLAY ERROR:", error);
