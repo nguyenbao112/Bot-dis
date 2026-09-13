@@ -11,6 +11,7 @@ import { PlayerManager } from "ziplayer";
 import {
   YouTubePlugin,
   SpotifyPlugin,
+  SoundCloudPlugin,
   TTSPlugin,
 } from "@ziplayer/plugin";
 import { InfinityPlugin } from "@ziplayer/infinity";
@@ -47,6 +48,7 @@ const manager = new PlayerManager({
   plugins: [
     new YouTubePlugin(),
     new SpotifyPlugin(),
+    new SoundCloudPlugin(),
     new TTSPlugin(),
     new InfinityPlugin(),
   ],
@@ -64,7 +66,7 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log("========================================");
   console.log("🤖 BOT MUSIC ĐÃ ONLINE SẴN SÀNG");
   console.log(`👤 ${readyClient.user.tag}`);
-  console.log("🎵 Nguồn hỗ trợ: YouTube, Spotify, Infinity");
+  console.log("🎵 Nguồn hỗ trợ: YouTube, Spotify, SoundCloud, Infinity");
   console.log("========================================");
 });
 
@@ -93,21 +95,6 @@ const applyClarity = async (player) => {
 manager.on("trackStart", async (player, track) => {
   console.log(`[${player.guildId}] ▶️ Đang phát: ${track?.title || "Unknown"}`);
   await applyClarity(player);
-
-  // Đổi Voice Channel Status
-  try {
-    const channelId = player.voiceChannelId || player.connection?.channelId;
-    if (channelId) {
-      const voiceChannel = await client.channels.fetch(channelId).catch(() => null);
-      if (voiceChannel && typeof voiceChannel.setStatus === "function") {
-        const titleText = (track?.title || "Đang phát nhạc...").slice(0, 50);
-        await voiceChannel.setStatus(titleText);
-        console.log(`[${player.guildId}] ✅ STATUS CHANGED: ${titleText}`);
-      }
-    }
-  } catch (err) {
-    console.warn(`[${player.guildId}] ⚠️ Không thể đổi Voice Status:`, err?.message || err);
-  }
 });
 
 manager.on("trackEnd", (player, track) => {
@@ -116,19 +103,6 @@ manager.on("trackEnd", (player, track) => {
 
 manager.on("queueEnd", async (player) => {
   console.log(`[${player.guildId}] 📭 Hàng đợi đã hết.`);
-
-  // Xóa Voice Channel Status khi hết nhạc
-  try {
-    const channelId = player.voiceChannelId || player.connection?.channelId;
-    if (channelId) {
-      const voiceChannel = await client.channels.fetch(channelId).catch(() => null);
-      if (voiceChannel && typeof voiceChannel.setStatus === "function") {
-        await voiceChannel.setStatus("");
-      }
-    }
-  } catch (err) {
-    console.warn(`[${player.guildId}] ⚠️ Không thể xóa Voice Status:`, err?.message || err);
-  }
 });
 
 manager.on("playerError", (player, error, track) => {
@@ -168,7 +142,7 @@ client.on(Events.MessageCreate, async (msg) => {
       const helpEmbed = new EmbedBuilder()
         .setColor("#0099ff")
         .setTitle("🎵 BẢNG HƯỚNG DẪN SỬ DỤNG BOT NHẠC")
-        .setDescription("Tiền tố lệnh là: `B.`\nTrình phát hỗ trợ các nguồn: **YouTube, Spotify, Infinity**.")
+        .setDescription("Tiền tố lệnh là: `B.`\nTrình phát hỗ trợ các nguồn: **YouTube, Spotify, SoundCloud, Infinity**.")
         .addFields(
           {
             name: "▶️ Phát Nhạc",
@@ -251,13 +225,6 @@ client.on(Events.MessageCreate, async (msg) => {
     if (command === "leave") {
       if (!player) return msg.reply("❌ Bot chưa ở trong phòng voice.");
 
-      // Reset trạng thái voice channel khi rời phòng
-      try {
-        if (voiceChannel && typeof voiceChannel.setStatus === "function") {
-          await voiceChannel.setStatus("");
-        }
-      } catch (e) {}
-
       player.destroy();
       return msg.reply("👋 Bot đã rời phòng voice.");
     }
@@ -283,9 +250,8 @@ client.on(Events.MessageCreate, async (msg) => {
         let searchQuery = query.trim();
 
         if (command === "scplay" || command === "sc") {
-          if (!searchQuery.startsWith("scsearch:") && (!searchQuery.startsWith("http://") && !searchQuery.startsWith("https://"))) {
-            searchQuery = `scsearch:${searchQuery}`;
-          } else if (searchQuery.includes("on.soundcloud.com")) {
+          const isUrl = searchQuery.startsWith("http://") || searchQuery.startsWith("https://");
+          if (!isUrl && !searchQuery.startsWith("scsearch:")) {
             searchQuery = `scsearch:${searchQuery}`;
           }
         }
@@ -341,14 +307,6 @@ client.on(Events.MessageCreate, async (msg) => {
     /* STOP */
     if (command === "stop") {
       player.stop();
-
-      // Reset trạng thái voice channel khi dừng nhạc
-      try {
-        if (voiceChannel && typeof voiceChannel.setStatus === "function") {
-          await voiceChannel.setStatus("");
-        }
-      } catch (e) {}
-
       return msg.reply("⏹️ Đã dừng nhạc.");
     }
 
