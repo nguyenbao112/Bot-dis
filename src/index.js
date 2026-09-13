@@ -7,6 +7,10 @@ import {
   EmbedBuilder,
   PermissionFlagsBits,
   Events,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
 } from "discord.js";
 import { PlayerManager } from "ziplayer";
 import {
@@ -60,7 +64,7 @@ const manager = new PlayerManager({
 });
 
 /* =========================================================
-   HELPER: RESOLVE SHORT LINK SOUNDCLOUD
+   HELPER: RESOLVE SHORT LINK SOUNDCLOUD & FORMAT TIME
 ========================================================= */
 
 const resolveUrl = (url) => {
@@ -80,6 +84,16 @@ const resolveUrl = (url) => {
       resolve(url);
     });
   });
+};
+
+const formatDuration = (ms) => {
+  if (!ms || Number.isNaN(ms)) return "Live / Unknown";
+  const seconds = Math.floor((ms / 1000) % 60);
+  const minutes = Math.floor((ms / (1000 * 60)) % 60);
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+
+  const pad = (n) => (n < 10 ? `0${n}` : n);
+  return hours > 0 ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
 };
 
 /* =========================================================
@@ -277,30 +291,106 @@ client.on(Events.MessageCreate, async (msg) => {
           searchQuery = await resolveUrl(searchQuery);
         }
 
-        if (command === "scplay" || command === "sc") {
-          const isUrl = searchQuery.startsWith("http://") || searchQuery.startsWith("https://");
-          if (!isUrl && !searchQuery.startsWith("scsearch:")) {
-            searchQuery = `scsearch:${searchQuery}`;
-          }
+        const isUrl = searchQuery.startsWith("http://") || searchQuery.startsWith("https://");
+
+        if ((command === "scplay" || command === "sc") && !isUrl && !searchQuery.startsWith("scsearch:")) {
+          searchQuery = `scsearch:${searchQuery}`;
         }
 
         const result = await activePlayer.play(searchQuery, msg.author.id);
 
         if (result?.type === "PLAYLIST" || Array.isArray(result?.tracks)) {
           const count = result?.tracks?.length || 0;
-          return replyMsg.edit(`🎶 Đã thêm playlist **${count} bài** vào hàng đợi.`);
+          return replyMsg.edit({ content: `🎶 Đã thêm playlist **${count} bài** vào hàng đợi.` });
         }
 
-        const trackName = result?.track?.title || result?.title || result?.tracks?.[0]?.title;
+        const track = result?.tracks?.[0] || result?.track || activePlayer.currentTrack;
+        const trackName = track?.title;
 
         if (!trackName) {
-          return replyMsg.edit("❌ Không tìm thấy thông tin bài hát từ đường link này.");
+          return replyMsg.edit({ content: "❌ Không tìm thấy thông tin bài hát từ đường link này." });
         }
 
-        return replyMsg.edit(`▶️ Đã phát/thêm bài hát:\n**${trackName}**`);
+        // --- NÂNG CẤP GIAO DIỆN BẢNG EMBED VÀ NÚT TƯƠNG TÁC ---
+        const embed = new EmbedBuilder()
+          .setColor("#2b2d31")
+          .setTitle("🎶 Now Playing")
+          .setDescription(`**[${trackName}](${track?.url || searchQuery})**`)
+          .addFields(
+            { name: "Duration", value: `\`${formatDuration(track?.duration)}\``, inline: false },
+            { name: "Requested by", value: `${msg.author.username}`, inline: false }
+          )
+          .setFooter({ text: "Music Player Controls" });
+
+        if (track?.thumbnail) {
+          embed.setThumbnail(track.thumbnail);
+        }
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("btn_pause_resume")
+            .setLabel("Pause / Resume")
+            .setEmoji("⏯️")
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId("btn_skip")
+            .setLabel("Skip")
+            .setEmoji("⏭️")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("btn_stop")
+            .setLabel("End Session")
+            .setEmoji("⏹️")
+            .setStyle(ButtonStyle.Danger)
+        );
+
+        const response = await replyMsg.edit({
+          content: null,
+          embeds: [embed],
+          components: [row],
+        });
+
+        const collector = response.createMessageComponentCollector({
+          componentType: ComponentType.Button,
+          time: 3600000,
+        });
+
+        collector.on("collect", async (interaction) => {
+          const p = manager.get(msg.guildId);
+          if (!p) {
+            return interaction.reply({ content: "❌ Không tìm thấy trình phát nhạc.", ephemeral: true });
+          }
+
+          // Phân quyền: Chỉ người đã yêu cầu bài hát mới được dùng các nút
+          const currentReq = p.currentTrack?.requestedBy;
+          if (currentReq && currentReq !== interaction.user.id) {
+            return interaction.reply({ 
+              content: "🔒 Chỉ người đã yêu cầu bài hát này mới có quyền sử dụng các nút điều khiển!", 
+              ephemeral: true 
+            });
+          }
+
+          if (interaction.customId === "btn_pause_resume") {
+            if (p.isPaused) {
+              p.resume();
+              await interaction.reply({ content: "▶️ Đã tiếp tục phát nhạc.", ephemeral: true });
+            } else {
+              p.pause();
+              await interaction.reply({ content: "⏸️ Đã tạm dừng phát nhạc.", ephemeral: true });
+            }
+          } else if (interaction.customId === "btn_skip") {
+            p.skip();
+            await interaction.reply({ content: `⏭️ **${interaction.user.username}** đã bỏ qua bài hát!`, ephemeral: true });
+          } else if (interaction.customId === "btn_stop") {
+            p.stop();
+            await interaction.reply({ content: "⏹️ Đã dừng phát nhạc và xóa hàng đợi.", ephemeral: true });
+          }
+        });
+
+        return;
       } catch (error) {
         console.error("❌ PLAY ERROR:", error);
-        return replyMsg.edit("❌ Không thể tải/phát bài hát này.");
+        return replyMsg.edit({ content: "❌ Không thể tải/phát bài hát này." });
       }
     }
 
