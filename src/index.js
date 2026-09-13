@@ -283,7 +283,9 @@ client.on(Events.MessageCreate, async (msg) => {
         let searchQuery = query.trim();
 
         if (command === "scplay" || command === "sc") {
-          if (!searchQuery.startsWith("http://") && !searchQuery.startsWith("https://")) {
+          if (!searchQuery.startsWith("scsearch:") && (!searchQuery.startsWith("http://") && !searchQuery.startsWith("https://"))) {
+            searchQuery = `scsearch:${searchQuery}`;
+          } else if (searchQuery.includes("on.soundcloud.com")) {
             searchQuery = `scsearch:${searchQuery}`;
           }
         }
@@ -295,7 +297,7 @@ client.on(Events.MessageCreate, async (msg) => {
           return replyMsg.edit(`🎶 Đã thêm playlist **${count} bài** vào hàng đợi.`);
         }
 
-        const trackName = result?.track?.title || result?.title || activePlayer.currentTrack?.title || query;
+        const trackName = result?.track?.title || result?.title || result?.tracks?.[0]?.title || query;
         return replyMsg.edit(`▶️ Đã phát/thêm bài hát:\n**${trackName}**`);
       } catch (error) {
         console.error("❌ PLAY ERROR:", error);
